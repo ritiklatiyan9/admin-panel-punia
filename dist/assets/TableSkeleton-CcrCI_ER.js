@@ -1,0 +1,1 @@
+import{j as s}from"./vendor-BGigMeYS.js";import{S as o}from"./skeleton-BHIG9RH0.js";const t=({rows:e=6})=>s.jsx("div",{className:"space-y-2 p-3",children:Array.from({length:e}).map((r,a)=>s.jsx(o,{className:"h-11 w-full"},a))});export{t as T};

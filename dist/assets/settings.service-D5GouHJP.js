@@ -1,0 +1,1 @@
+import{i as a}from"./index-dePlLqhx.js";const i={list:async()=>{const{data:t}=await a.get("/settings");return t.data},update:async t=>{const{data:s}=await a.patch("/settings",{values:t});return s.data}};export{i as s};

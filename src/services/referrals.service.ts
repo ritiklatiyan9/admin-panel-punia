@@ -15,6 +15,7 @@ export interface ReferralRow {
     referralCode: string | null;
   } | null;
   creditedPoints: number | null;
+  inviteeCreditedPoints?: number;
 }
 
 export const referralsService = {

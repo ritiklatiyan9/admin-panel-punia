@@ -1,3 +1,4 @@
+import { ReferralRewards } from "./ReferralRewards";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { PageHeader } from "@/components/shared/PageHeader";
@@ -14,6 +15,7 @@ import { EmptyState } from "@/components/shared/EmptyState";
 import { TableSkeleton } from "@/components/shared/TableSkeleton";
 import { Coins } from "@/components/shared/Coins";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -33,7 +35,8 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { key: "referrerName", label: "Referrer" },
   { key: "referrerEmail", label: "Referrer email" },
   { key: "referralCode", label: "Referral code" },
-  { key: "creditedPoints", label: "Coins credited" },
+  { key: "creditedPoints", label: "Inviter coins" },
+  { key: "inviteeCreditedPoints", label: "Joining friend coins" },
   {
     key: "referredAt",
     label: "Date",
@@ -46,7 +49,7 @@ export const ReferralsPage = (): JSX.Element => {
   const [search, setSearch] = useState("");
   const [range, setRange] = useState<DateRangeValue>({ from: "", to: "" });
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["referrals", { page, search, range }],
     queryFn: ({ signal }) =>
       referralsService.list(
@@ -72,6 +75,7 @@ export const ReferralsPage = (): JSX.Element => {
         referrerEmail: row.referrer?.email ?? "—",
         referralCode: row.referrer?.referralCode ?? "—",
         creditedPoints: row.creditedPoints ?? "—",
+        inviteeCreditedPoints: row.inviteeCreditedPoints ?? 0,
         referredAt: row.referred.referredAt,
       })),
     [rows],
@@ -83,8 +87,10 @@ export const ReferralsPage = (): JSX.Element => {
     <div>
       <PageHeader
         title="Referrals"
-        description="Who referred whom, and the coins credited for each signup."
+        description="Set invitation rewards and track the coins credited when a friend applies a code."
       />
+
+      <ReferralRewards />
 
       <FiltersBar
         search={{
@@ -130,6 +136,13 @@ export const ReferralsPage = (): JSX.Element => {
       <Card>
         {isLoading ? (
           <TableSkeleton />
+        ) : isError ? (
+          <div className="p-6">
+            <p className="mb-3 text-sm">Could not load referral history.</p>
+            <Button variant="outline" onClick={() => refetch()}>
+              Try again
+            </Button>
+          </div>
         ) : !rows || rows.length === 0 ? (
           <EmptyState
             title="No referrals yet"
@@ -148,7 +161,8 @@ export const ReferralsPage = (): JSX.Element => {
                 <TableHead className="hidden sm:table-cell">
                   Referral code
                 </TableHead>
-                <TableHead className="text-right">Coins credited</TableHead>
+                <TableHead className="text-right">Inviter coins</TableHead>
+                <TableHead className="text-right">Friend coins</TableHead>
                 <TableHead className="hidden lg:table-cell">Date</TableHead>
               </TableRow>
             </TableHeader>
@@ -184,6 +198,9 @@ export const ReferralsPage = (): JSX.Element => {
                     ) : (
                       "—"
                     )}
+                  </TableCell>
+                  <TableCell className="text-right font-medium tabular-nums">
+                    <Coins value={row.inviteeCreditedPoints ?? 0} />
                   </TableCell>
                   <TableCell className="hidden whitespace-nowrap text-xs text-muted-foreground lg:table-cell">
                     {formatDateTime(row.referred.referredAt)}

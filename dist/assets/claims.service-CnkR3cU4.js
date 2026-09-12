@@ -1,1 +1,0 @@
-import{i}from"./index-Nmu9eubt.js";const c={list:async(t,e)=>{const{data:a}=await i.get("/claims",{params:t,signal:e});return{items:a.data,meta:a.meta}},review:async(t,e)=>{const{data:a}=await i.patch(`/claims/${t}/review`,e);return a.data}};export{c};
