@@ -1,12 +1,15 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { memo, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
+  ArrowPathIcon,
   BellSlashIcon,
   LinkIcon,
   PhotoIcon,
 } from "@heroicons/react/24/outline";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Table,
   TableBody,
@@ -23,10 +26,13 @@ import {
   ExportButton,
   type ExportColumn,
 } from "@/components/shared/ExportButton";
+import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { Pagination } from "@/components/shared/Pagination";
 import { TableSkeleton } from "@/components/shared/TableSkeleton";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { notificationsService } from "@/services/notifications.service";
+import { apiErrorMessage } from "@/services/api-client";
+import { useAuthStore } from "@/store/auth.store";
 import { formatDateTime } from "@/utils/format";
 import type { PushAudience, PushLog, PushLogStatus } from "@/types/domain";
 
@@ -92,39 +98,180 @@ const EXPORT_COLUMNS: ExportColumn[] = [
 const localDay = (iso: string): string =>
   new Date(iso).toLocaleDateString("en-CA");
 
-export const HistoryTable = (): JSX.Element => {
+const pending = (status: PushLogStatus): boolean =>
+  status === "QUEUED" || status === "SCHEDULED";
+
+/** Thin two-tone delivered/failed bar with the counts spelled out under it. */
+const DeliveryCell = ({ log }: { log: PushLog }): JSX.Element => {
+  if (pending(log.status))
+    return <span className="text-sm text-muted-foreground">—</span>;
+  const total = log.successCount + log.failureCount;
+  const pct = (n: number): string => (total ? `${(n / total) * 100}%` : "0%");
+  return (
+    <div className="min-w-32">
+      <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
+        <div className="bg-teal-500" style={{ width: pct(log.successCount) }} />
+        <div className="bg-red-400" style={{ width: pct(log.failureCount) }} />
+      </div>
+      <p className="mt-1 whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+        <span className="text-teal-600 dark:text-teal-400">
+          {log.successCount} delivered
+        </span>
+        {log.failureCount > 0 && (
+          <>
+            {" · "}
+            <span className="text-red-500">{log.failureCount} failed</span>
+          </>
+        )}
+      </p>
+    </div>
+  );
+};
+
+interface RowProps {
+  log: PushLog;
+  canCancel: boolean;
+  onResend?: (log: PushLog) => void;
+  onCancel: (log: PushLog) => void;
+}
+
+// Memoized so a poll tick only re-renders rows whose data actually changed.
+const HistoryRow = memo(
+  ({ log, canCancel, onResend, onCancel }: RowProps): JSX.Element => (
+    <TableRow>
+      <TableCell className="whitespace-nowrap text-sm">
+        {formatDateTime(log.createdAt)}
+        <p className="text-xs text-muted-foreground">by {log.sentBy.name}</p>
+      </TableCell>
+      <TableCell className="whitespace-nowrap">
+        <AudienceChip log={log} />
+      </TableCell>
+      <TableCell className="max-w-72" title={`${log.title}\n\n${log.body}`}>
+        <p className="truncate text-sm font-medium">{log.title}</p>
+        <p className="truncate text-xs text-muted-foreground">{log.body}</p>
+        {(log.imageUrl || log.route || log.silent) && (
+          <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+            {log.imageUrl && (
+              <span className="flex items-center gap-1" title={log.imageUrl}>
+                <PhotoIcon className="h-3.5 w-3.5" /> Image
+              </span>
+            )}
+            {log.route && (
+              <span className="flex items-center gap-1">
+                <LinkIcon className="h-3.5 w-3.5" /> {log.route}
+              </span>
+            )}
+            {log.silent && (
+              <span className="flex items-center gap-1">
+                <BellSlashIcon className="h-3.5 w-3.5" /> Silent
+              </span>
+            )}
+          </p>
+        )}
+      </TableCell>
+      <TableCell>
+        <DeliveryCell log={log} />
+      </TableCell>
+      <TableCell>
+        <Badge variant={statusVariant[log.status]}>
+          {log.status === "QUEUED" && (
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
+          )}
+          {log.status}
+        </Badge>
+        {log.status === "SCHEDULED" && log.scheduledAt && (
+          <p className="mt-1 whitespace-nowrap text-xs text-muted-foreground">
+            Fires {formatDateTime(log.scheduledAt)}
+          </p>
+        )}
+        {(log.status === "PARTIAL" || log.status === "FAILED") && log.error && (
+          <p className="mt-1 max-w-64 text-xs text-muted-foreground">
+            {log.error}
+          </p>
+        )}
+      </TableCell>
+      <TableCell className="whitespace-nowrap text-right">
+        {log.status === "SCHEDULED" && canCancel && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-red-600 hover:text-red-700 dark:text-red-400"
+            onClick={() => onCancel(log)}
+          >
+            Cancel
+          </Button>
+        )}
+        {onResend && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => onResend(log)}
+            title="Prefill the composer with this notification"
+          >
+            <ArrowPathIcon className="mr-1 h-3.5 w-3.5" /> Send again
+          </Button>
+        )}
+      </TableCell>
+    </TableRow>
+  ),
+);
+
+interface HistoryTableProps {
+  /** Present only when the viewer can compose (super admin). */
+  onResend?: (log: PushLog) => void;
+}
+
+export const HistoryTable = ({ onResend }: HistoryTableProps): JSX.Element => {
+  const queryClient = useQueryClient();
+  const canCancel = useAuthStore((state) => state.user?.role === "SUPER_ADMIN");
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<PushLogStatus | "ALL">("ALL");
   const [audience, setAudience] = useState<PushAudience | "ALL">("ALL");
-  const [search, setSearch] = useState("");
+  const [search, setSearch] = useState(""); // FiltersBar debounces this ~400ms
   const [range, setRange] = useState<DateRangeValue>({ from: "", to: "" });
+  const [cancelLog, setCancelLog] = useState<PushLog | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["notifications", "history", page],
     queryFn: ({ signal }) =>
       notificationsService.history({ page, limit: PAGE_SIZE }, signal),
-    // Poll while any loaded row is still queued, stop once all have settled.
+    // Poll only while something on this page is still in flight; stop once all have settled.
     refetchInterval: (query) =>
-      query.state.data?.items.some((log) => log.status === "QUEUED")
-        ? 8000
-        : false,
+      query.state.data?.items.some((log) => pending(log.status)) ? 5000 : false,
+  });
+
+  const cancel = useMutation({
+    mutationFn: (id: string) => notificationsService.cancelScheduled(id),
+    onSuccess: () => toast.success("Scheduled push cancelled"),
+    // A 404 means it already fired — refetch either way so the row shows its real state.
+    onError: (error) => toast.error(apiErrorMessage(error)),
+    onSettled: () => {
+      setCancelLog(null);
+      void queryClient.invalidateQueries({
+        queryKey: ["notifications", "history"],
+      });
+    },
   });
 
   // The history endpoint only paginates — these filters apply to the loaded page client-side.
   const term = search.trim().toLowerCase();
-  const visible = (data?.items ?? []).filter((log) => {
-    const day = localDay(log.createdAt);
-    return (
-      (status === "ALL" || log.status === status) &&
-      (audience === "ALL" || log.audience === audience) &&
-      (!range.from || day >= range.from) &&
-      (!range.to || day <= range.to) &&
-      (!term ||
-        log.title.toLowerCase().includes(term) ||
-        log.body.toLowerCase().includes(term) ||
-        (log.topic ?? "").toLowerCase().includes(term))
-    );
-  });
+  const visible = useMemo(
+    () =>
+      (data?.items ?? []).filter((log) => {
+        const day = localDay(log.createdAt);
+        return (
+          (status === "ALL" || log.status === status) &&
+          (audience === "ALL" || log.audience === audience) &&
+          (!range.from || day >= range.from) &&
+          (!range.to || day <= range.to) &&
+          (!term ||
+            log.title.toLowerCase().includes(term) ||
+            log.body.toLowerCase().includes(term) ||
+            (log.topic ?? "").toLowerCase().includes(term))
+        );
+      }),
+    [data, status, audience, range.from, range.to, term],
+  );
 
   const hasFilters =
     status !== "ALL" ||
@@ -159,102 +306,29 @@ export const HistoryTable = (): JSX.Element => {
     )
   ) : (
     <>
-      <div className="overflow-x-auto">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Sent</TableHead>
-              <TableHead>Audience</TableHead>
-              <TableHead>Notification</TableHead>
-              <TableHead className="text-right">Delivered</TableHead>
-              <TableHead>Extras</TableHead>
-              <TableHead>Status</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {visible.map((log) => (
-              <TableRow key={log.id}>
-                <TableCell className="whitespace-nowrap text-sm">
-                  {formatDateTime(log.createdAt)}
-                  <p className="text-xs text-muted-foreground">
-                    by {log.sentBy.name}
-                  </p>
-                  {log.scheduledAt && log.status === "SCHEDULED" && (
-                    <p className="text-xs text-muted-foreground">
-                      fires {formatDateTime(log.scheduledAt)}
-                    </p>
-                  )}
-                </TableCell>
-                <TableCell className="whitespace-nowrap">
-                  <AudienceChip log={log} />
-                </TableCell>
-                <TableCell
-                  className="max-w-64"
-                  title={`${log.title}\n\n${log.body}`}
-                >
-                  <p className="truncate text-sm font-medium">{log.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {log.body}
-                  </p>
-                </TableCell>
-                <TableCell className="whitespace-nowrap text-right text-sm tabular-nums">
-                  {log.status === "QUEUED" || log.status === "SCHEDULED" ? (
-                    <span className="text-muted-foreground">—</span>
-                  ) : (
-                    <>
-                      <span className="text-teal-600 dark:text-teal-400">
-                        {log.successCount}
-                      </span>
-                      {log.failureCount > 0 && (
-                        <span className="text-red-500">
-                          {" "}
-                          / {log.failureCount} failed
-                        </span>
-                      )}
-                    </>
-                  )}
-                </TableCell>
-                <TableCell>
-                  <span className="flex items-center gap-1.5 text-muted-foreground">
-                    {log.imageUrl && (
-                      <PhotoIcon
-                        className="h-4 w-4"
-                        title={log.imageUrl}
-                        aria-label="Has image"
-                      />
-                    )}
-                    {log.route && (
-                      <LinkIcon
-                        className="h-4 w-4"
-                        title={`Opens ${log.route}`}
-                        aria-label={`Opens ${log.route}`}
-                      />
-                    )}
-                    {log.silent && (
-                      <BellSlashIcon
-                        className="h-4 w-4"
-                        title="Silent (data-only)"
-                        aria-label="Silent"
-                      />
-                    )}
-                  </span>
-                </TableCell>
-                <TableCell>
-                  <Badge
-                    variant={statusVariant[log.status]}
-                    title={log.error ?? undefined}
-                  >
-                    {log.status === "QUEUED" && (
-                      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" />
-                    )}
-                    {log.status}
-                  </Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Sent</TableHead>
+            <TableHead>Audience</TableHead>
+            <TableHead>Notification</TableHead>
+            <TableHead>Delivery</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {visible.map((log) => (
+            <HistoryRow
+              key={log.id}
+              log={log}
+              canCancel={canCancel}
+              onResend={onResend}
+              onCancel={setCancelLog}
+            />
+          ))}
+        </TableBody>
+      </Table>
       {data && <Pagination meta={data.meta} onPageChange={setPage} />}
     </>
   );
@@ -317,6 +391,17 @@ export const HistoryTable = (): JSX.Element => {
         </div>
       </FiltersBar>
       <Card>{table}</Card>
+
+      <ConfirmDialog
+        open={cancelLog !== null}
+        onOpenChange={(open) => !open && setCancelLog(null)}
+        title={`Cancel "${cancelLog?.title}"?`}
+        description={`Scheduled for ${formatDateTime(cancelLog?.scheduledAt ?? null)}. It will not be sent.`}
+        confirmLabel="Cancel send"
+        destructive
+        loading={cancel.isPending}
+        onConfirm={() => cancelLog && cancel.mutate(cancelLog.id)}
+      />
     </>
   );
 };

@@ -48,6 +48,11 @@ export const notificationsService = {
     await apiClient.post("/notifications/send", input);
   },
 
+  /** Cancel a SCHEDULED push before it fires (super admin). 404 once it has left SCHEDULED. */
+  cancelScheduled: async (id: string): Promise<void> => {
+    await apiClient.delete(`/notifications/history/${id}`);
+  },
+
   /** Admin send history with delivery outcomes. */
   history: async (
     params: { page: number; limit: number },

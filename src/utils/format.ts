@@ -1,11 +1,15 @@
 // Coins: strip trailing zeros (1.20 -> "1.2", 100.00 -> "100"), keep thousands grouping.
-const coinsFormatter = new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 });
+const coinsFormatter = new Intl.NumberFormat("en-US", {
+  maximumFractionDigits: 2,
+});
 
 const numberFormatter = new Intl.NumberFormat("en-US");
 
-export const formatCoins = (value: number): string => coinsFormatter.format(value);
+export const formatCoins = (value: number): string =>
+  coinsFormatter.format(value);
 
-export const formatNumber = (value: number): string => numberFormatter.format(value);
+export const formatNumber = (value: number): string =>
+  numberFormatter.format(value);
 
 export const formatDate = (iso: string | null): string =>
   iso
@@ -26,7 +30,3 @@ export const formatDateTime = (iso: string | null): string =>
         minute: "2-digit",
       })
     : "—";
-
-/** ISO date (yyyy-mm-dd) for <input type="date"> values. */
-export const toDateInputValue = (iso: string | null): string =>
-  iso ? new Date(iso).toISOString().slice(0, 10) : "";

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckIcon } from "@heroicons/react/24/outline";
@@ -11,14 +11,16 @@ import {
   ExportButton,
   type ExportColumn,
 } from "@/components/shared/ExportButton";
+import { Segmented } from "@/components/shared/app-preview";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { notificationsService } from "@/services/notifications.service";
 import { apiErrorMessage } from "@/services/api-client";
 import { useAuthStore } from "@/store/auth.store";
+import { cn } from "@/utils/cn";
 import { formatDateTime } from "@/utils/format";
-import type { NotificationType } from "@/types/domain";
+import type { NotificationType, PushLog } from "@/types/domain";
 import { Composer } from "./Composer";
 import { HistoryTable } from "./HistoryTable";
 
@@ -82,13 +84,11 @@ const InboxView = (): JSX.Element => {
         notification.body.toLowerCase().includes(term)),
   );
 
-  const invalidate = (): void => {
-    void queryClient.invalidateQueries({ queryKey: ["notifications"] });
-  };
-
   const markRead = useMutation({
     mutationFn: notificationsService.markRead,
-    onSuccess: invalidate,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    },
     onError: (error) => toast.error(apiErrorMessage(error)),
   });
 
@@ -170,18 +170,25 @@ const InboxView = (): JSX.Element => {
                 return (
                   <li
                     key={notification.id}
-                    className={`flex items-start gap-3 p-4 ${unread ? "bg-muted/40" : ""}`}
+                    className={cn(
+                      "flex items-start gap-3 p-4",
+                      unread && "bg-muted/40",
+                    )}
                   >
                     <span
-                      className={`mt-2 h-2 w-2 shrink-0 rounded-full ${
-                        unread ? "bg-primary" : "bg-transparent"
-                      }`}
+                      className={cn(
+                        "mt-2 h-2 w-2 shrink-0 rounded-full",
+                        unread ? "bg-primary" : "bg-transparent",
+                      )}
                       aria-hidden
                     />
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p
-                          className={`text-sm ${unread ? "font-semibold" : "font-medium"}`}
+                          className={cn(
+                            "text-sm",
+                            unread ? "font-semibold" : "font-medium",
+                          )}
                         >
                           {notification.title}
                         </p>
@@ -220,11 +227,18 @@ const InboxView = (): JSX.Element => {
 
 export const NotificationsPage = (): JSX.Element => {
   const queryClient = useQueryClient();
-  const user = useAuthStore((state) => state.user);
   // The server enforces SUPER_ADMIN on /send — this just hides a composer that would 403.
-  const canSend = user?.role === "SUPER_ADMIN";
+  const canSend = useAuthStore((state) => state.user?.role === "SUPER_ADMIN");
 
   const [view, setView] = useState<"send" | "inbox">("send");
+  const [prefill, setPrefill] = useState<PushLog | null>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
+
+  // Same key/fn as the Topbar and Sidebar bell — react-query dedupes, no extra request.
+  const unread = useQuery({
+    queryKey: ["notifications", "unread-count"],
+    queryFn: notificationsService.unreadCount,
+  });
 
   const markAllRead = useMutation({
     mutationFn: notificationsService.markAllRead,
@@ -234,6 +248,12 @@ export const NotificationsPage = (): JSX.Element => {
     },
     onError: (error) => toast.error(apiErrorMessage(error)),
   });
+
+  // Stable so memoized history rows don't re-render on every page render.
+  const resend = useCallback((log: PushLog): void => {
+    setPrefill({ ...log }); // new identity each click → the composer re-hydrates
+    composerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
 
   return (
     <div>
@@ -253,27 +273,38 @@ export const NotificationsPage = (): JSX.Element => {
         }
       />
 
-      <div className="mb-4 flex items-center gap-2">
-        <Button
-          variant={view === "send" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setView("send")}
-        >
-          Send & history
-        </Button>
-        <Button
-          variant={view === "inbox" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setView("inbox")}
-        >
-          My inbox
-        </Button>
-      </div>
+      <Segmented
+        className="mb-4"
+        size="md"
+        value={view}
+        onChange={setView}
+        options={[
+          { id: "send", label: "Send" },
+          {
+            id: "inbox",
+            label: (
+              <>
+                Inbox
+                {unread.data != null && unread.data > 0 && (
+                  <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">
+                    {unread.data}
+                  </span>
+                )}
+              </>
+            ),
+          },
+        ]}
+      />
 
       {view === "send" ? (
         <>
-          {canSend && <Composer />}
-          <HistoryTable />
+          {canSend && (
+            // scroll-mt clears the sticky topbar when "Send again" scrolls here.
+            <div ref={composerRef} className="scroll-mt-20">
+              <Composer prefill={prefill} />
+            </div>
+          )}
+          <HistoryTable onResend={canSend ? resend : undefined} />
         </>
       ) : (
         <InboxView />

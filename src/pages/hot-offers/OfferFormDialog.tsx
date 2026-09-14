@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -14,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -27,10 +27,49 @@ import type {
   CompletedBehavior,
   ContentStatus,
   HotOffer,
+  HotOfferDetails,
+  HotOfferInput,
   OfferCategory,
   OfferDifficulty,
 } from "@/types/domain";
 import { ImageUrlField } from "./ImageUrlField";
+import { OfferPreview, type OfferPreviewDraft } from "./OfferPreview";
+
+/** Form state. Numbers stay strings so clearing a field never snaps to 0. */
+interface Draft {
+  categoryId: string;
+  title: string;
+  appName: string;
+  shortDescription: string;
+  description: string;
+  taskDescription: string;
+  features: string;
+  instructions: string;
+  requirements: string;
+  terms: string;
+  warning: string;
+  rewardAmount: string;
+  rewardCoins: string;
+  rewardLabel: string;
+  difficulty: OfferDifficulty;
+  estimatedTime: string;
+  rating: string;
+  playStoreUrl: string;
+  logoUrl: string;
+  thumbnailUrl: string;
+  bannerUrl: string;
+  brandLogoUrl: string;
+  featured: boolean;
+  trending: boolean;
+  isProduct: boolean;
+  expiresAt: string;
+  maxUsers: string;
+  maxRewards: string;
+  dailyLimit: string;
+  priority: string;
+  status: ContentStatus;
+  completedBehavior: CompletedBehavior;
+}
 
 /** datetime-local value (local tz, minute precision) from an ISO string. */
 const toLocalInput = (iso: string | null): string => {
@@ -42,21 +81,142 @@ const toLocalInput = (iso: string | null): string => {
   )}:${pad(date.getMinutes())}`;
 };
 
-interface OfferFormDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  categories: OfferCategory[];
-  /** null = create; otherwise the card row — full details are fetched here. */
-  offer: HotOffer | null;
-  /** App Offers module: force isProduct=true and surface the brand logo first. */
-  lockProduct?: boolean;
-}
-
 const linesToList = (value: string): string[] =>
   value
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean);
+
+const str = (value: number | null | undefined): string =>
+  value == null ? "" : String(value);
+const numOrNull = (value: string): number | null =>
+  value.trim() === "" ? null : Number(value);
+
+const toDraft = (
+  d: HotOfferDetails | undefined,
+  fallbackCategoryId: string,
+  lockProduct: boolean,
+): Draft => ({
+  categoryId: d?.category.id ?? fallbackCategoryId,
+  title: d?.title ?? "",
+  appName: d?.appName ?? "",
+  shortDescription: d?.shortDescription ?? "",
+  description: d?.description ?? "",
+  taskDescription: d?.taskDescription ?? "",
+  features: (d?.features ?? []).join("\n"),
+  instructions: (d?.instructions ?? []).join("\n"),
+  requirements: (d?.requirements ?? []).join("\n"),
+  terms: d?.terms ?? "",
+  warning: d?.warning ?? "",
+  rewardAmount: str(d?.rewardAmount ?? 0),
+  rewardCoins: str(d?.rewardCoins ?? 0),
+  rewardLabel: d?.rewardLabel ?? "",
+  difficulty: d?.difficulty ?? "EASY",
+  estimatedTime: d?.estimatedTime ?? "",
+  rating: str(d?.rating),
+  playStoreUrl: d?.playStoreUrl ?? "",
+  logoUrl: d?.logoUrl ?? "",
+  thumbnailUrl: d?.thumbnailUrl ?? "",
+  bannerUrl: d?.bannerUrl ?? "",
+  brandLogoUrl: d?.brandLogoUrl ?? "",
+  featured: d?.featured ?? false,
+  trending: d?.trending ?? false,
+  isProduct: lockProduct || (d?.isProduct ?? false),
+  expiresAt: toLocalInput(d?.expiresAt ?? null),
+  maxUsers: str(d?.maxUsers),
+  maxRewards: str(d?.maxRewards),
+  dailyLimit: str(d?.dailyLimit),
+  priority: str(d?.priority ?? 0),
+  status: d?.status ?? "DRAFT",
+  completedBehavior: d?.completedBehavior ?? "SHOW",
+});
+
+const toInput = (f: Draft, lockProduct: boolean): HotOfferInput => ({
+  categoryId: f.categoryId,
+  title: f.title.trim(),
+  appName: f.appName.trim() || null,
+  shortDescription: f.shortDescription.trim(),
+  description: f.description.trim(),
+  taskDescription: f.taskDescription.trim() || null,
+  features: linesToList(f.features),
+  instructions: linesToList(f.instructions),
+  requirements: linesToList(f.requirements),
+  terms: f.terms.trim() || null,
+  warning: f.warning.trim() || null,
+  rewardAmount: Number(f.rewardAmount) || 0,
+  rewardCoins: Number(f.rewardCoins) || 0,
+  rewardLabel: f.rewardLabel.trim() || null,
+  difficulty: f.difficulty,
+  estimatedTime: f.estimatedTime.trim() || null,
+  rating: numOrNull(f.rating),
+  playStoreUrl: f.playStoreUrl.trim(),
+  logoUrl: f.logoUrl.trim() || null,
+  thumbnailUrl: f.thumbnailUrl.trim() || null,
+  bannerUrl: f.bannerUrl.trim() || null,
+  featured: f.featured,
+  trending: f.trending,
+  isProduct: lockProduct || f.isProduct,
+  brandLogoUrl: f.brandLogoUrl.trim() || null,
+  expiresAt: f.expiresAt ? new Date(f.expiresAt).toISOString() : null,
+  maxUsers: numOrNull(f.maxUsers),
+  maxRewards: numOrNull(f.maxRewards),
+  dailyLimit: numOrNull(f.dailyLimit),
+  completedBehavior: f.completedBehavior,
+  priority: Number(f.priority) || 0,
+  status: f.status,
+});
+
+const Section = ({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  children: ReactNode;
+}): JSX.Element => (
+  <section className="space-y-3">
+    <div>
+      <h3 className="text-sm font-semibold">{title}</h3>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+    {children}
+  </section>
+);
+
+const Field = ({
+  label,
+  htmlFor,
+  hint,
+  children,
+}: {
+  label: ReactNode;
+  htmlFor?: string;
+  hint?: string;
+  children: ReactNode;
+}): JSX.Element => (
+  <div className="space-y-1.5">
+    <Label htmlFor={htmlFor}>{label}</Label>
+    {children}
+    {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+  </div>
+);
+
+const STATUS_NOTE: Record<ContentStatus, string> = {
+  DRAFT: "Saved as a draft — hidden from users.",
+  PUBLISHED: "Visible to users as soon as you save.",
+  ARCHIVED: "Archived — hidden from users.",
+};
+
+interface OfferFormDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  categories: OfferCategory[];
+  /** null = create; otherwise the list row — full details are fetched here. */
+  offer: HotOffer | null;
+  /** App Offers module: force isProduct=true and surface the brand logo first. */
+  lockProduct?: boolean;
+}
 
 export const OfferFormDialog = ({
   open,
@@ -67,121 +227,40 @@ export const OfferFormDialog = ({
 }: OfferFormDialogProps): JSX.Element => {
   const queryClient = useQueryClient();
 
-  const [categoryId, setCategoryId] = useState("");
-  const [title, setTitle] = useState("");
-  const [appName, setAppName] = useState("");
-  const [shortDescription, setShortDescription] = useState("");
-  const [description, setDescription] = useState("");
-  const [features, setFeatures] = useState("");
-  const [instructions, setInstructions] = useState("");
-  const [requirements, setRequirements] = useState("");
-  const [terms, setTerms] = useState("");
-  const [warning, setWarning] = useState("");
-  const [rewardAmount, setRewardAmount] = useState(0);
-  const [rewardCoins, setRewardCoins] = useState(0);
-  const [rewardLabel, setRewardLabel] = useState("");
-  const [taskDescription, setTaskDescription] = useState("");
-  const [difficulty, setDifficulty] = useState<OfferDifficulty>("EASY");
-  const [estimatedTime, setEstimatedTime] = useState("");
-  const [rating, setRating] = useState("");
-  const [playStoreUrl, setPlayStoreUrl] = useState("");
-  const [logoUrl, setLogoUrl] = useState("");
-  const [thumbnailUrl, setThumbnailUrl] = useState("");
-  const [bannerUrl, setBannerUrl] = useState("");
-  const [featured, setFeatured] = useState(false);
-  const [trending, setTrending] = useState(false);
-  const [isProduct, setIsProduct] = useState(false);
-  const [brandLogoUrl, setBrandLogoUrl] = useState("");
-  const [expiresAt, setExpiresAt] = useState("");
-  const [maxUsers, setMaxUsers] = useState("");
-  const [maxRewards, setMaxRewards] = useState("");
-  const [dailyLimit, setDailyLimit] = useState("");
-  const [priority, setPriority] = useState(0);
-  const [status, setStatus] = useState<ContentStatus>("DRAFT");
-  const [completedBehavior, setCompletedBehavior] = useState<CompletedBehavior>("SHOW");
-
   const details = useQuery({
     queryKey: ["hot-offers", "offer", offer?.id],
     queryFn: () => hotOffersService.getOffer(offer!.id),
     enabled: open && offer !== null,
   });
 
-  useEffect(() => {
-    if (!open) return;
-    const d = details.data;
-    setCategoryId(d?.category.id ?? offer?.category.id ?? categories[0]?.id ?? "");
-    setTitle(d?.title ?? "");
-    setAppName(d?.appName ?? "");
-    setShortDescription(d?.shortDescription ?? "");
-    setDescription(d?.description ?? "");
-    setFeatures((d?.features ?? []).join("\n"));
-    setInstructions((d?.instructions ?? []).join("\n"));
-    setRequirements((d?.requirements ?? []).join("\n"));
-    setTerms(d?.terms ?? "");
-    setWarning(d?.warning ?? "");
-    setRewardAmount(d?.rewardAmount ?? 0);
-    setRewardCoins(d?.rewardCoins ?? 0);
-    setRewardLabel(d?.rewardLabel ?? "");
-    setTaskDescription(d?.taskDescription ?? "");
-    setDifficulty(d?.difficulty ?? "EASY");
-    setEstimatedTime(d?.estimatedTime ?? "");
-    setRating(d?.rating != null ? String(d.rating) : "");
-    setPlayStoreUrl(d?.playStoreUrl ?? "");
-    setLogoUrl(d?.logoUrl ?? "");
-    setThumbnailUrl(d?.thumbnailUrl ?? "");
-    setBannerUrl(d?.bannerUrl ?? "");
-    setFeatured(d?.featured ?? false);
-    setTrending(d?.trending ?? false);
-    setIsProduct(lockProduct || (d?.isProduct ?? false));
-    setBrandLogoUrl(d?.brandLogoUrl ?? "");
-    setExpiresAt(toLocalInput(d?.expiresAt ?? null));
-    setMaxUsers(d?.maxUsers != null ? String(d.maxUsers) : "");
-    setMaxRewards(d?.maxRewards != null ? String(d.maxRewards) : "");
-    setDailyLimit(d?.dailyLimit != null ? String(d.dailyLimit) : "");
-    setPriority(d?.priority ?? 0);
-    setStatus(d?.status ?? "DRAFT");
-    setCompletedBehavior(d?.completedBehavior ?? "SHOW");
-  }, [open, offer, categories, details.data, lockProduct]);
+  const fallbackCategoryId = offer?.category.id ?? categories[0]?.id ?? "";
+  const [form, setForm] = useState<Draft>(() =>
+    toDraft(undefined, fallbackCategoryId, lockProduct),
+  );
+  const set =
+    <K extends keyof Draft>(key: K) =>
+    (value: Draft[K]): void =>
+      setForm((current) => ({ ...current, [key]: value }));
 
-  const numOrNull = (value: string): number | null =>
-    value.trim() === "" ? null : Number(value);
+  // Hydrate when the dialog opens and the full offer is available (list rows
+  // lack the long fields). Keyed on `loaded`, not the data object, so a
+  // background refetch can't wipe half-typed edits.
+  const loaded = offer === null || details.isSuccess;
+  useEffect(() => {
+    if (!open || !loaded) return;
+    const data = offer
+      ? queryClient.getQueryData<HotOfferDetails>([
+          "hot-offers",
+          "offer",
+          offer.id,
+        ])
+      : undefined;
+    setForm(toDraft(data, fallbackCategoryId, lockProduct));
+  }, [open, loaded, offer, queryClient, fallbackCategoryId, lockProduct]);
 
   const save = useMutation({
     mutationFn: () => {
-      const input = {
-        categoryId,
-        title: title.trim(),
-        appName: appName.trim() || null,
-        shortDescription: shortDescription.trim(),
-        description: description.trim(),
-        features: linesToList(features),
-        instructions: linesToList(instructions),
-        requirements: linesToList(requirements),
-        terms: terms.trim() || null,
-        warning: warning.trim() || null,
-        rewardAmount,
-        rewardCoins,
-        rewardLabel: rewardLabel.trim() || null,
-        taskDescription: taskDescription.trim() || null,
-        difficulty,
-        estimatedTime: estimatedTime.trim() || null,
-        rating: rating.trim() === "" ? null : Number(rating),
-        playStoreUrl: playStoreUrl.trim(),
-        logoUrl: logoUrl.trim() || null,
-        thumbnailUrl: thumbnailUrl.trim() || null,
-        bannerUrl: bannerUrl.trim() || null,
-        featured,
-        trending,
-        isProduct: lockProduct || isProduct,
-        brandLogoUrl: brandLogoUrl.trim() || null,
-        expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
-        maxUsers: numOrNull(maxUsers),
-        maxRewards: numOrNull(maxRewards),
-        dailyLimit: numOrNull(dailyLimit),
-        completedBehavior,
-        priority,
-        status,
-      };
+      const input = toInput(form, lockProduct);
       return offer
         ? hotOffersService.updateOffer(offer.id, input)
         : hotOffersService.createOffer(input);
@@ -194,377 +273,540 @@ export const OfferFormDialog = ({
     onError: (error) => toast.error(apiErrorMessage(error)),
   });
 
-  const sectionTitle = "text-xs font-semibold uppercase tracking-wide text-muted-foreground";
+  const isProduct = lockProduct || form.isProduct;
+  const preview: OfferPreviewDraft = {
+    title: form.title,
+    appName: form.appName,
+    categoryTitle:
+      categories.find((category) => category.id === form.categoryId)?.title ??
+      "",
+    description: form.description,
+    features: linesToList(form.features),
+    instructions: linesToList(form.instructions),
+    requirements: linesToList(form.requirements),
+    terms: form.terms,
+    warning: form.warning,
+    rewardAmount: Number(form.rewardAmount) || 0,
+    rewardCoins: Number(form.rewardCoins) || 0,
+    rewardLabel: form.rewardLabel,
+    difficulty: form.difficulty,
+    estimatedTime: form.estimatedTime,
+    rating: numOrNull(form.rating),
+    logoUrl: form.logoUrl,
+    thumbnailUrl: form.thumbnailUrl,
+    bannerUrl: form.bannerUrl,
+    brandLogoUrl: form.brandLogoUrl,
+    featured: form.featured,
+    trending: form.trending,
+    isProduct,
+  };
+
+  const noun = lockProduct ? "app offer" : "offer";
+
+  const brandLogoField = (
+    <ImageUrlField
+      label="Brand logo"
+      value={form.brandLogoUrl}
+      onChange={set("brandLogoUrl")}
+      hint="Brand chip on the offer page; home card art when there is no thumbnail."
+    />
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>{offer ? "Edit offer" : "New offer"}</DialogTitle>
-          <DialogDescription>
-            One offer powers a website card and its details page, ending at its Play
-            Store URL.
-          </DialogDescription>
-        </DialogHeader>
+      <DialogContent
+        className="flex h-[92vh] max-h-[92vh] w-[calc(100vw-2rem)] max-w-6xl flex-col gap-0 overflow-hidden p-0"
+        // A stray click outside must not throw away a long form; Esc and Cancel still close.
+        onInteractOutside={(event) => event.preventDefault()}
+      >
+        <div className="grid min-h-0 flex-1 grid-cols-1 lg:grid-cols-[minmax(0,1fr)_400px]">
+          {/* ---- form ---- */}
+          <div className="flex min-h-0 flex-col">
+            <DialogHeader className="border-b px-6 pb-4 pt-6">
+              <DialogTitle>
+                {offer ? `Edit ${noun}` : `New ${noun}`}
+              </DialogTitle>
+              <DialogDescription>
+                {lockProduct
+                  ? "Shown on the app home rail, the Explore grid and its own offer page — the preview on the right is what users see."
+                  : "One offer powers an Explore card and its offer page, ending at its Play Store URL."}
+              </DialogDescription>
+            </DialogHeader>
 
-        {offer && details.isLoading ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
-        ) : (
-          <form
-            className="space-y-5"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!title.trim() || !shortDescription.trim() || !description.trim()) {
-                toast.error("Title and descriptions are required");
-                return;
-              }
-              if (!playStoreUrl.trim().startsWith("https://play.google.com/")) {
-                toast.error("Play Store URL must start with https://play.google.com/");
-                return;
-              }
-              save.mutate();
-            }}
-          >
-            <p className={sectionTitle}>Basics</p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>Category</Label>
-                <Select value={categoryId} onValueChange={setCategoryId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Pick a category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {categories.map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.title}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-app">App name</Label>
-                <Input id="of-app" value={appName} onChange={(e) => setAppName(e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="of-title">Title</Label>
-              <Input id="of-title" value={title} onChange={(e) => setTitle(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="of-short">Card description (short)</Label>
-              <Input
-                id="of-short"
-                maxLength={200}
-                value={shortDescription}
-                onChange={(e) => setShortDescription(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="of-desc">Full description</Label>
-              <Textarea
-                id="of-desc"
-                rows={4}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="of-task">Task (what the user must do to earn)</Label>
-              <Textarea
-                id="of-task"
-                rows={2}
-                value={taskDescription}
-                onChange={(e) => setTaskDescription(e.target.value)}
-                placeholder="e.g. Install and reach level 5 within 3 days"
-              />
-            </div>
-
-            <p className={sectionTitle}>Media</p>
-            {/* lockProduct: brand logo leads — it's the hero asset of app/brand offers */}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              {lockProduct && (
-                <div className="sm:col-span-3 rounded-lg border border-primary/40 bg-primary/5 p-3">
-                  <ImageUrlField label="Brand logo" value={brandLogoUrl} onChange={setBrandLogoUrl} />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Shown as the brand chip on home cards and the carousel.
+            <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+              {offer && details.isError ? (
+                <div className="flex flex-col items-start gap-3 py-6">
+                  <p className="text-sm text-muted-foreground">
+                    {apiErrorMessage(details.error)}
                   </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void details.refetch()}
+                  >
+                    Try again
+                  </Button>
                 </div>
-              )}
-              <ImageUrlField label="Logo" value={logoUrl} onChange={setLogoUrl} />
-              <ImageUrlField label="Thumbnail (card)" value={thumbnailUrl} onChange={setThumbnailUrl} />
-              <ImageUrlField label="Banner (details)" value={bannerUrl} onChange={setBannerUrl} />
-              {!lockProduct && (
-                <div>
-                  <ImageUrlField label="Brand logo" value={brandLogoUrl} onChange={setBrandLogoUrl} />
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Product offers render in the home carousel with this logo.
-                  </p>
+              ) : offer && !loaded ? (
+                <div className="space-y-3">
+                  <Skeleton className="h-9 w-full" />
+                  <Skeleton className="h-9 w-2/3" />
+                  <Skeleton className="h-24 w-full" />
                 </div>
-              )}
-            </div>
-
-            <p className={sectionTitle}>Content lists (one item per line)</p>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="of-features">Features</Label>
-                <Textarea
-                  id="of-features"
-                  rows={4}
-                  value={features}
-                  onChange={(e) => setFeatures(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-instructions">Instructions</Label>
-                <Textarea
-                  id="of-instructions"
-                  rows={4}
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-requirements">Requirements</Label>
-                <Textarea
-                  id="of-requirements"
-                  rows={4}
-                  value={requirements}
-                  onChange={(e) => setRequirements(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="of-terms">Terms</Label>
-                <Textarea id="of-terms" rows={2} value={terms} onChange={(e) => setTerms(e.target.value)} />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-warning">Warning</Label>
-                <Textarea
-                  id="of-warning"
-                  rows={2}
-                  value={warning}
-                  onChange={(e) => setWarning(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <p className={sectionTitle}>Reward & store</p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="of-reward">Reward coins (shown on card)</Label>
-                <Input
-                  id="of-reward"
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={rewardAmount}
-                  onChange={(e) => setRewardAmount(Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-coins">Reward coins (credited)</Label>
-                <Input
-                  id="of-coins"
-                  type="number"
-                  min={0}
-                  value={rewardCoins}
-                  onChange={(e) => setRewardCoins(Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-reward-label">Reward label</Label>
-                <Input
-                  id="of-reward-label"
-                  value={rewardLabel}
-                  onChange={(e) => setRewardLabel(e.target.value)}
-                  placeholder="50 coins"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Difficulty</Label>
-                <Select
-                  value={difficulty}
-                  onValueChange={(value) => setDifficulty(value as OfferDifficulty)}
+              ) : (
+                <form
+                  id="offer-form"
+                  className="space-y-7"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    save.mutate();
+                  }}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="EASY">Easy</SelectItem>
-                    <SelectItem value="MEDIUM">Medium</SelectItem>
-                    <SelectItem value="HARD">Hard</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-time">Estimated time</Label>
-                <Input
-                  id="of-time"
-                  value={estimatedTime}
-                  onChange={(e) => setEstimatedTime(e.target.value)}
-                  placeholder="10 min"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-rating">Rating (0–5)</Label>
-                <Input
-                  id="of-rating"
-                  type="number"
-                  min={0}
-                  max={5}
-                  step="0.1"
-                  value={rating}
-                  onChange={(e) => setRating(e.target.value)}
-                />
-              </div>
+                  <Section title="Basics">
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Category">
+                        <Select
+                          value={form.categoryId}
+                          onValueChange={set("categoryId")}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Pick a category" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {categories.map((category) => (
+                              <SelectItem key={category.id} value={category.id}>
+                                {category.title}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="App / brand name" htmlFor="of-app">
+                        <Input
+                          id="of-app"
+                          maxLength={120}
+                          value={form.appName}
+                          onChange={(e) => set("appName")(e.target.value)}
+                          placeholder="e.g. Zepto"
+                        />
+                      </Field>
+                    </div>
+                    <Field label="Title" htmlFor="of-title">
+                      <Input
+                        id="of-title"
+                        required
+                        maxLength={140}
+                        value={form.title}
+                        onChange={(e) => set("title")(e.target.value)}
+                        placeholder="e.g. Order groceries on Zepto"
+                      />
+                    </Field>
+                    <Field
+                      label="Card description (short)"
+                      htmlFor="of-short"
+                      hint={`${form.shortDescription.length}/200 characters · shown under the title on cards`}
+                    >
+                      <Input
+                        id="of-short"
+                        required
+                        maxLength={200}
+                        value={form.shortDescription}
+                        onChange={(e) =>
+                          set("shortDescription")(e.target.value)
+                        }
+                      />
+                    </Field>
+                    <Field label="Full description" htmlFor="of-desc">
+                      <Textarea
+                        id="of-desc"
+                        required
+                        rows={4}
+                        maxLength={10_000}
+                        value={form.description}
+                        onChange={(e) => set("description")(e.target.value)}
+                      />
+                    </Field>
+                    <Field
+                      label="Task (what the user must do to earn)"
+                      htmlFor="of-task"
+                    >
+                      <Textarea
+                        id="of-task"
+                        rows={2}
+                        maxLength={2000}
+                        value={form.taskDescription}
+                        onChange={(e) => set("taskDescription")(e.target.value)}
+                        placeholder="e.g. Install and place your first order within 3 days"
+                      />
+                    </Field>
+                  </Section>
+
+                  <Section
+                    title="Media"
+                    hint="Upload or paste a URL. The preview updates as each image loads."
+                  >
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {lockProduct && (
+                        <div className="sm:col-span-2">{brandLogoField}</div>
+                      )}
+                      <ImageUrlField
+                        label="Thumbnail (card art)"
+                        value={form.thumbnailUrl}
+                        onChange={set("thumbnailUrl")}
+                        hint="Home card (contained) and Explore card (16:9, cropped)."
+                      />
+                      <ImageUrlField
+                        label="Logo"
+                        value={form.logoUrl}
+                        onChange={set("logoUrl")}
+                        hint="Offer page identity; card art fallback when there is no thumbnail."
+                      />
+                      <ImageUrlField
+                        label="Banner (offer page hero)"
+                        value={form.bannerUrl}
+                        onChange={set("bannerUrl")}
+                        hint="Top of the offer page. Falls back to thumbnail, then logo."
+                      />
+                      {!lockProduct && brandLogoField}
+                    </div>
+                  </Section>
+
+                  <Section title="Reward">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                      <Field
+                        label="Coins credited on approval"
+                        htmlFor="of-reward"
+                        hint="What the wallet receives."
+                      >
+                        <Input
+                          id="of-reward"
+                          type="number"
+                          required
+                          min={0}
+                          max={1_000_000}
+                          step="0.01"
+                          value={form.rewardAmount}
+                          onChange={(e) => set("rewardAmount")(e.target.value)}
+                        />
+                      </Field>
+                      <Field
+                        label="Coins shown in app"
+                        htmlFor="of-coins"
+                        hint="Optional. 0 = show the credited amount."
+                      >
+                        <Input
+                          id="of-coins"
+                          type="number"
+                          min={0}
+                          max={10_000_000}
+                          step={1}
+                          value={form.rewardCoins}
+                          onChange={(e) => set("rewardCoins")(e.target.value)}
+                        />
+                      </Field>
+                      <Field
+                        label="Website reward label"
+                        htmlFor="of-reward-label"
+                        hint="Optional. Replaces the number on the offer page."
+                      >
+                        <Input
+                          id="of-reward-label"
+                          maxLength={80}
+                          value={form.rewardLabel}
+                          onChange={(e) => set("rewardLabel")(e.target.value)}
+                          placeholder="₹50 cashback"
+                        />
+                      </Field>
+                      <Field label="Difficulty">
+                        <Select
+                          value={form.difficulty}
+                          onValueChange={(value) =>
+                            set("difficulty")(value as OfferDifficulty)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="EASY">Easy</SelectItem>
+                            <SelectItem value="MEDIUM">Medium</SelectItem>
+                            <SelectItem value="HARD">Hard</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label="Estimated time" htmlFor="of-time">
+                        <Input
+                          id="of-time"
+                          maxLength={40}
+                          value={form.estimatedTime}
+                          onChange={(e) => set("estimatedTime")(e.target.value)}
+                          placeholder="10 min"
+                        />
+                      </Field>
+                      <Field label="Rating (0–5)" htmlFor="of-rating">
+                        <Input
+                          id="of-rating"
+                          type="number"
+                          min={0}
+                          max={5}
+                          step="0.1"
+                          value={form.rating}
+                          onChange={(e) => set("rating")(e.target.value)}
+                          placeholder="4.5"
+                        />
+                      </Field>
+                    </div>
+                  </Section>
+
+                  <Section
+                    title="Play Store & limits"
+                    hint="Caps are enforced by the submission guard; blank means unlimited."
+                  >
+                    <Field label="Play Store URL" htmlFor="of-store">
+                      <Input
+                        id="of-store"
+                        type="url"
+                        required
+                        maxLength={2048}
+                        pattern="https://play\.google\.com/.*"
+                        title="Must start with https://play.google.com/"
+                        value={form.playStoreUrl}
+                        onChange={(e) => set("playStoreUrl")(e.target.value)}
+                        placeholder="https://play.google.com/store/apps/details?id=com.xyz.app"
+                      />
+                    </Field>
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <Field label="Offer expiry" htmlFor="of-expiry">
+                        <Input
+                          id="of-expiry"
+                          type="datetime-local"
+                          value={form.expiresAt}
+                          onChange={(e) => set("expiresAt")(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Max users" htmlFor="of-max-users">
+                        <Input
+                          id="of-max-users"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={form.maxUsers}
+                          onChange={(e) => set("maxUsers")(e.target.value)}
+                          placeholder="∞"
+                        />
+                      </Field>
+                      <Field label="Max rewards" htmlFor="of-max-rewards">
+                        <Input
+                          id="of-max-rewards"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={form.maxRewards}
+                          onChange={(e) => set("maxRewards")(e.target.value)}
+                          placeholder="∞"
+                        />
+                      </Field>
+                      <Field label="Daily limit / user" htmlFor="of-daily">
+                        <Input
+                          id="of-daily"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={form.dailyLimit}
+                          onChange={(e) => set("dailyLimit")(e.target.value)}
+                          placeholder="∞"
+                        />
+                      </Field>
+                    </div>
+                  </Section>
+
+                  <Section
+                    title="Offer page content"
+                    hint="One item per line, up to 20 lines each. Empty sections are hidden on the page."
+                  >
+                    <div className="grid gap-3 sm:grid-cols-3">
+                      <Field
+                        label="How to complete it"
+                        htmlFor="of-instructions"
+                      >
+                        <Textarea
+                          id="of-instructions"
+                          rows={5}
+                          value={form.instructions}
+                          onChange={(e) => set("instructions")(e.target.value)}
+                          placeholder={
+                            "Install the app\nSign up with your number\nPlace your first order"
+                          }
+                        />
+                      </Field>
+                      <Field label="Features" htmlFor="of-features">
+                        <Textarea
+                          id="of-features"
+                          rows={5}
+                          value={form.features}
+                          onChange={(e) => set("features")(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Requirements" htmlFor="of-requirements">
+                        <Textarea
+                          id="of-requirements"
+                          rows={5}
+                          value={form.requirements}
+                          onChange={(e) => set("requirements")(e.target.value)}
+                          placeholder={"New users only\nIndia only"}
+                        />
+                      </Field>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <Field label="Terms" htmlFor="of-terms">
+                        <Textarea
+                          id="of-terms"
+                          rows={2}
+                          maxLength={5000}
+                          value={form.terms}
+                          onChange={(e) => set("terms")(e.target.value)}
+                        />
+                      </Field>
+                      <Field label="Warning" htmlFor="of-warning">
+                        <Textarea
+                          id="of-warning"
+                          rows={2}
+                          maxLength={1000}
+                          value={form.warning}
+                          onChange={(e) => set("warning")(e.target.value)}
+                          placeholder="Shown in red on the offer page"
+                        />
+                      </Field>
+                    </div>
+                  </Section>
+
+                  <Section title="Publishing">
+                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <Field label="Status">
+                        <Select
+                          value={form.status}
+                          onValueChange={(value) =>
+                            set("status")(value as ContentStatus)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="DRAFT">Draft</SelectItem>
+                            <SelectItem value="PUBLISHED">Published</SelectItem>
+                            <SelectItem value="ARCHIVED">Archived</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field
+                        label="Priority"
+                        htmlFor="of-priority"
+                        hint="Higher sorts first."
+                      >
+                        <Input
+                          id="of-priority"
+                          type="number"
+                          min={0}
+                          max={10_000}
+                          step={1}
+                          value={form.priority}
+                          onChange={(e) => set("priority")(e.target.value)}
+                        />
+                      </Field>
+                      <div className="col-span-2 flex flex-wrap items-center gap-x-5 gap-y-3 pt-6">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                          <Switch
+                            checked={form.featured}
+                            onCheckedChange={set("featured")}
+                          />
+                          Featured
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                          <Switch
+                            checked={form.trending}
+                            onCheckedChange={set("trending")}
+                          />
+                          Trending
+                          <span className="text-xs text-muted-foreground">
+                            (“HOT” ribbon)
+                          </span>
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                          <Switch
+                            checked={isProduct}
+                            onCheckedChange={set("isProduct")}
+                            disabled={lockProduct}
+                          />
+                          Product offer
+                          <span className="text-xs text-muted-foreground">
+                            {lockProduct ? "(always on here)" : "(home rail)"}
+                          </span>
+                        </label>
+                      </div>
+                    </div>
+                    <Field
+                      label="After a user completes this offer"
+                      hint="Applies once their proof is approved. Other users are unaffected."
+                    >
+                      <Select
+                        value={form.completedBehavior}
+                        onValueChange={(value) =>
+                          set("completedBehavior")(value as CompletedBehavior)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="SHOW">
+                            Keep showing the offer normally
+                          </SelectItem>
+                          <SelectItem value="HIDE">
+                            Hide the offer from them
+                          </SelectItem>
+                          <SelectItem value="SHOW_COMPLETED">
+                            Show with a disabled &quot;Completed&quot; button
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </Section>
+                </form>
+              )}
             </div>
 
-            <p className={sectionTitle}>Limits & availability</p>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="space-y-1.5">
-                <Label htmlFor="of-expiry">Offer expiry</Label>
-                <Input
-                  id="of-expiry"
-                  type="datetime-local"
-                  value={expiresAt}
-                  onChange={(e) => setExpiresAt(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-max-users">Max users</Label>
-                <Input
-                  id="of-max-users"
-                  type="number"
-                  min={1}
-                  value={maxUsers}
-                  onChange={(e) => setMaxUsers(e.target.value)}
-                  placeholder="∞"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-max-rewards">Max rewards</Label>
-                <Input
-                  id="of-max-rewards"
-                  type="number"
-                  min={1}
-                  value={maxRewards}
-                  onChange={(e) => setMaxRewards(e.target.value)}
-                  placeholder="∞"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="of-daily">Daily limit / user</Label>
-                <Input
-                  id="of-daily"
-                  type="number"
-                  min={1}
-                  value={dailyLimit}
-                  onChange={(e) => setDailyLimit(e.target.value)}
-                  placeholder="∞"
-                />
-              </div>
-            </div>
-            <p className="-mt-1 text-xs text-muted-foreground">
-              Caps are stored now and enforced by the fraud/submission guard (Module 4).
-            </p>
-            <div className="space-y-1.5">
-              <Label htmlFor="of-store">Play Store URL</Label>
-              <Input
-                id="of-store"
-                value={playStoreUrl}
-                onChange={(e) => setPlayStoreUrl(e.target.value)}
-                placeholder="https://play.google.com/store/apps/details?id=com.xyz.app"
-              />
-            </div>
-
-            <p className={sectionTitle}>Publishing</p>
-            <div className="grid grid-cols-3 items-end gap-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="of-priority">Priority</Label>
-                <Input
-                  id="of-priority"
-                  type="number"
-                  min={0}
-                  value={priority}
-                  onChange={(e) => setPriority(Number(e.target.value))}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Status</Label>
-                <Select value={status} onValueChange={(value) => setStatus(value as ContentStatus)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="DRAFT">Draft</SelectItem>
-                    <SelectItem value="PUBLISHED">Published</SelectItem>
-                    <SelectItem value="ARCHIVED">Archived</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="flex items-center gap-4 pb-2">
-                <div className="flex items-center gap-2">
-                  <Switch id="of-featured" checked={featured} onCheckedChange={setFeatured} />
-                  <Label htmlFor="of-featured" className="cursor-pointer">
-                    Featured
-                  </Label>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Switch id="of-trending" checked={trending} onCheckedChange={setTrending} />
-                  <Label htmlFor="of-trending" className="cursor-pointer">
-                    Trending
-                  </Label>
-                </div>
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label>After a user completes this offer</Label>
-              <Select
-                value={completedBehavior}
-                onValueChange={(value) => setCompletedBehavior(value as CompletedBehavior)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="SHOW">Keep showing the offer normally</SelectItem>
-                  <SelectItem value="HIDE">Hide the offer from them</SelectItem>
-                  <SelectItem value="SHOW_COMPLETED">
-                    Show with a disabled &quot;Completed&quot; button
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Applies once their proof is approved. Other users are unaffected.
+            <div className="flex items-center gap-3 border-t px-6 py-4">
+              <p className="mr-auto text-xs text-muted-foreground">
+                {STATUS_NOTE[form.status]}
               </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="of-product"
-                checked={isProduct}
-                onCheckedChange={setIsProduct}
-                disabled={lockProduct}
-              />
-              <Label htmlFor="of-product" className="cursor-pointer">
-                Product offer — featured on app home
-                {lockProduct && (
-                  <span className="ml-1 text-muted-foreground">(always on for App Offers)</span>
-                )}
-              </Label>
-            </div>
-
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+              >
                 Cancel
               </Button>
-              <Button type="submit" disabled={save.isPending}>
-                {save.isPending ? "Saving…" : "Save offer"}
+              <Button
+                type="submit"
+                form="offer-form"
+                disabled={save.isPending || !loaded}
+              >
+                {save.isPending
+                  ? "Saving…"
+                  : offer
+                    ? "Save changes"
+                    : `Create ${noun}`}
               </Button>
-            </DialogFooter>
-          </form>
-        )}
+            </div>
+          </div>
+
+          {/* ---- live preview (desktop) ---- */}
+          <aside className="hidden min-h-0 border-l bg-muted/30 lg:flex lg:flex-col">
+            <OfferPreview draft={preview} className="h-full" />
+          </aside>
+        </div>
       </DialogContent>
     </Dialog>
   );

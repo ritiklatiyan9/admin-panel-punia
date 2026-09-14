@@ -1,49 +1,33 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import {
-  PencilSquareIcon,
-  PlusIcon,
-  TrashIcon,
-} from "@heroicons/react/24/outline";
+import { PlusIcon } from "@heroicons/react/24/outline";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Pagination } from "@/components/shared/Pagination";
 import { EmptyState } from "@/components/shared/EmptyState";
-import { TableSkeleton } from "@/components/shared/TableSkeleton";
 import { ConfirmDialog } from "@/components/shared/ConfirmDialog";
 import { FiltersBar } from "@/components/shared/FiltersBar";
 import {
   ExportButton,
   type ExportColumn,
 } from "@/components/shared/ExportButton";
-import { Coins } from "@/components/shared/Coins";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { hotOffersService } from "@/services/hot-offers.service";
 import { apiErrorMessage } from "@/services/api-client";
 import { useAuthStore } from "@/store/auth.store";
 import { formatDateTime } from "@/utils/format";
 import type { ContentStatus, HotOffer } from "@/types/domain";
+import { Segmented } from "@/components/shared/app-preview";
 import { OfferFormDialog } from "../hot-offers/OfferFormDialog";
+import {
+  OFFER_GRID,
+  OfferCard,
+  OfferCardSkeletons,
+} from "../hot-offers/OfferCards";
 import { SubmissionsReview } from "../hot-offers/SubmissionsReview";
 
-const PAGE_SIZE = 10;
-
-const statusBadge: Record<ContentStatus, "secondary" | "success" | "outline"> =
-  {
-    DRAFT: "secondary",
-    PUBLISHED: "success",
-    ARCHIVED: "outline",
-  };
+const PAGE_SIZE = 12;
 
 const STATUS_OPTIONS = [
   { value: "ALL", label: "All statuses" },
@@ -60,8 +44,8 @@ const OFFER_COLUMNS: ExportColumn[] = [
     label: "Category",
     format: (v) => (v as { title: string }).title,
   },
-  { key: "rewardAmount", label: "Reward coins" },
-  { key: "rewardCoins", label: "Coins" },
+  { key: "rewardAmount", label: "Coins credited" },
+  { key: "rewardCoins", label: "Coins shown in app" },
   { key: "featured", label: "Featured", format: (v) => (v ? "Yes" : "No") },
   { key: "status", label: "Status" },
   {
@@ -95,7 +79,7 @@ export const AppOffersPage = (): JSX.Element => {
     queryKey: [
       "hot-offers",
       "offers",
-      { page, search, statusFilter, product: true },
+      { page, search, statusFilter, product: true, limit: PAGE_SIZE },
     ],
     queryFn: ({ signal }) =>
       hotOffersService.listOffers(
@@ -121,38 +105,50 @@ export const AppOffersPage = (): JSX.Element => {
     onError: (error) => toast.error(apiErrorMessage(error)),
   });
 
+  const openCreate = (): void => {
+    setEditingOffer(null);
+    setOfferDialog(true);
+  };
+
+  const hasFilters = search.trim() !== "" || statusFilter !== "ALL";
+  const total = offers.data?.meta.total;
+
   return (
     <div>
       <PageHeader
         title="App Offers"
-        description="App/brand (product) offers featured on the app home and carousel, plus their proof submissions."
+        description="Brand and product offers users see on the app home rail, the Explore grid and inside the Web Zone."
         actions={
           canWrite && view === "offers" ? (
-            <Button
-              onClick={() => {
-                setEditingOffer(null);
-                setOfferDialog(true);
-              }}
-            >
+            <Button onClick={openCreate}>
               <PlusIcon className="mr-1.5 h-4 w-4" /> New app offer
             </Button>
           ) : undefined
         }
       />
 
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        {(["offers", "submissions"] as const).map((tab) => (
-          <Button
-            key={tab}
-            variant={view === tab ? "default" : "outline"}
-            size="sm"
-            className="capitalize"
-            onClick={() => setView(tab)}
-          >
-            {tab}
-          </Button>
-        ))}
-      </div>
+      <Segmented
+        className="mb-4"
+        size="md"
+        value={view}
+        onChange={setView}
+        options={[
+          {
+            id: "offers",
+            label: (
+              <>
+                Offers
+                {total != null && (
+                  <span className="rounded-full bg-muted px-1.5 text-xs tabular-nums text-muted-foreground">
+                    {total}
+                  </span>
+                )}
+              </>
+            ),
+          },
+          { id: "submissions", label: "Submissions" },
+        ]}
+      />
 
       {view === "offers" && (
         <>
@@ -208,105 +204,45 @@ export const AppOffersPage = (): JSX.Element => {
             </div>
           </FiltersBar>
 
-          <Card>
-            {offers.isLoading ? (
-              <TableSkeleton />
-            ) : !offers.data || offers.data.items.length === 0 ? (
+          {offers.isLoading ? (
+            <OfferCardSkeletons />
+          ) : !offers.data || offers.data.items.length === 0 ? (
+            <Card>
               <EmptyState
-                title="No app offers"
-                description="Product offers with a brand logo appear on the app home carousel."
+                title={hasFilters ? "No offers match" : "No app offers yet"}
+                description={
+                  hasFilters
+                    ? "Try a different search or status."
+                    : "Create the first product offer — it shows on the app home rail once published."
+                }
+                action={
+                  canWrite && !hasFilters ? (
+                    <Button onClick={openCreate}>
+                      <PlusIcon className="mr-1.5 h-4 w-4" /> New app offer
+                    </Button>
+                  ) : undefined
+                }
               />
-            ) : (
-              <>
-                <div className="overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Offer</TableHead>
-                        <TableHead className="text-right">Coins</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Created</TableHead>
-                        {canWrite && (
-                          <TableHead className="text-right">Actions</TableHead>
-                        )}
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {offers.data.items.map((offer) => (
-                        <TableRow key={offer.id}>
-                          <TableCell className="max-w-64">
-                            <div className="flex items-center gap-2.5">
-                              {(offer.brandLogoUrl ?? offer.logoUrl) && (
-                                <img
-                                  src={
-                                    offer.brandLogoUrl ??
-                                    offer.logoUrl ??
-                                    undefined
-                                  }
-                                  alt=""
-                                  className="h-9 w-9 shrink-0 rounded-md border object-cover"
-                                  onError={(e) =>
-                                    (e.currentTarget.style.display = "none")
-                                  }
-                                />
-                              )}
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">
-                                  {offer.title}
-                                  <Badge className="ml-2">Product</Badge>
-                                  {offer.featured && (
-                                    <Badge className="ml-2" variant="info">
-                                      Featured
-                                    </Badge>
-                                  )}
-                                </p>
-                                <p className="truncate text-xs text-muted-foreground">
-                                  {offer.shortDescription}
-                                </p>
-                              </div>
-                            </div>
-                          </TableCell>
-                          <TableCell className="text-right text-sm font-medium">
-                            <Coins value={offer.rewardCoins} />
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant={statusBadge[offer.status]}>
-                              {offer.status}
-                            </Badge>
-                          </TableCell>
-                          <TableCell className="whitespace-nowrap text-sm">
-                            {formatDateTime(offer.createdAt)}
-                          </TableCell>
-                          {canWrite && (
-                            <TableCell className="text-right">
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => {
-                                  setEditingOffer(offer);
-                                  setOfferDialog(true);
-                                }}
-                              >
-                                <PencilSquareIcon className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                onClick={() => setDeleteOffer(offer)}
-                              >
-                                <TrashIcon className="h-4 w-4 text-red-500" />
-                              </Button>
-                            </TableCell>
-                          )}
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-                <Pagination meta={offers.data.meta} onPageChange={setPage} />
-              </>
-            )}
-          </Card>
+            </Card>
+          ) : (
+            <>
+              <div className={OFFER_GRID}>
+                {offers.data.items.map((offer) => (
+                  <OfferCard
+                    key={offer.id}
+                    offer={offer}
+                    canWrite={canWrite}
+                    onEdit={() => {
+                      setEditingOffer(offer);
+                      setOfferDialog(true);
+                    }}
+                    onDelete={() => setDeleteOffer(offer)}
+                  />
+                ))}
+              </div>
+              <Pagination meta={offers.data.meta} onPageChange={setPage} />
+            </>
+          )}
         </>
       )}
 
@@ -323,7 +259,7 @@ export const AppOffersPage = (): JSX.Element => {
         open={deleteOffer !== null}
         onOpenChange={(open) => !open && setDeleteOffer(null)}
         title={`Delete "${deleteOffer?.title}"?`}
-        description="Soft delete — the offer disappears from the app home."
+        description="Soft delete — the offer disappears from the app home rail and Explore."
         confirmLabel="Delete"
         destructive
         loading={removeOffer.isPending}
