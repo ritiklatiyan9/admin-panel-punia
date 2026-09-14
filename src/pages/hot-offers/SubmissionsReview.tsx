@@ -34,6 +34,7 @@ import { hotOffersService } from "@/services/hot-offers.service";
 import { apiErrorMessage } from "@/services/api-client";
 import { useAuthStore } from "@/store/auth.store";
 import { formatDateTime } from "@/utils/format";
+import { mediaUrl } from "@/utils/media-url";
 import type { OfferSubmission, SubmissionStatus } from "@/types/domain";
 
 const PAGE_SIZE = 10;
@@ -223,7 +224,7 @@ export const SubmissionsReview = ({
                           title={`View screenshot ${index + 1} of ${shots.length}`}
                         >
                           <img
-                            src={url}
+                            src={mediaUrl(url)}
                             alt={`Proof ${index + 1}`}
                             className="h-full w-full object-cover"
                           />
@@ -340,7 +341,7 @@ export const SubmissionsReview = ({
           {preview && (
             <>
               <img
-                src={preview.urls[preview.index]}
+                src={mediaUrl(preview.urls[preview.index])}
                 alt="Proof"
                 className="max-h-[70vh] w-full rounded-lg object-contain"
               />

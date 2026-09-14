@@ -198,7 +198,7 @@ export const hotOffersService = {
     const form = new FormData();
     form.append("file", file);
     const { data } = await apiClient.post<ApiSuccess<{ url: string }>>(
-      "/uploads",
+      "/uploads?purpose=CONTENT",
       form,
       {
         headers: { "Content-Type": "multipart/form-data" },

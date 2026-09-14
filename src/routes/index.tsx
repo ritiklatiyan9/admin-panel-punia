@@ -92,6 +92,11 @@ const AppGraphicsPage = lazyPage(
   () => import("@/pages/app-graphics/AppGraphicsPage"),
   "AppGraphicsPage",
 );
+const MediaLibraryPage = lazyPage(
+  "/media",
+  () => import("@/pages/media/MediaLibraryPage"),
+  "MediaLibraryPage",
+);
 const MissionsPage = lazyPage(
   "/missions",
   () => import("@/pages/missions/MissionsPage"),
@@ -160,6 +165,7 @@ export const router = createBrowserRouter([
             element: withSuspense(<GameManagementPage />),
           },
           { path: "/app-graphics", element: withSuspense(<AppGraphicsPage />) },
+          { path: "/media", element: withSuspense(<MediaLibraryPage />) },
           { path: "/analytics", element: withSuspense(<AnalyticsPage />) },
           { path: "/settings", element: withSuspense(<SettingsPage />) },
           { path: "*", element: <NotFound /> },
