@@ -5,6 +5,7 @@
  */
 import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { cn } from "@/utils/cn";
+import { OptimizedImage } from "./OptimizedImage";
 
 export const APP = {
   ink: "#242320",
@@ -60,7 +61,7 @@ export const Artwork = ({
   );
   if (!src) return <>{fallback}</>;
   return (
-    <img
+    <OptimizedImage
       src={src}
       alt=""
       className={cn(

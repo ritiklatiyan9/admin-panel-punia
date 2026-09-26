@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ComponentType } from "react";
-import { createBrowserRouter, Link } from "react-router-dom";
+import { createBrowserRouter, Link, Navigate } from "react-router-dom";
 import { DashboardLayout } from "@/layouts/DashboardLayout";
 import { ProtectedRoute } from "./ProtectedRoute";
 import { registerRoutePreload } from "./preload";
@@ -26,11 +26,6 @@ const DashboardPage = lazyPage(
   "/",
   () => import("@/pages/dashboard/DashboardPage"),
   "DashboardPage",
-);
-const CampaignsPage = lazyPage(
-  "/campaigns",
-  () => import("@/pages/campaigns/CampaignsPage"),
-  "CampaignsPage",
 );
 const ClaimsPage = lazyPage(
   "/claims",
@@ -73,14 +68,14 @@ const SettingsPage = lazyPage(
   "SettingsPage",
 );
 const HotOffersPage = lazyPage(
-  "/hot-offers",
+  "/offers",
   () => import("@/pages/hot-offers/HotOffersPage"),
   "HotOffersPage",
 );
-const AppOffersPage = lazyPage(
-  "/app-offers",
-  () => import("@/pages/app-offers/AppOffersPage"),
-  "AppOffersPage",
+const SurveysPage = lazyPage(
+  "/surveys",
+  () => import("@/pages/surveys/SurveysPage"),
+  "SurveysPage",
 );
 const ReferralsPage = lazyPage(
   "/referrals",
@@ -142,7 +137,13 @@ export const router = createBrowserRouter([
         element: <DashboardLayout />,
         children: [
           { path: "/", element: withSuspense(<DashboardPage />) },
-          { path: "/campaigns", element: withSuspense(<CampaignsPage />) },
+          { path: "/offers", element: withSuspense(<HotOffersPage />) },
+          // Old modules merged into Offers; keep their bookmarks working.
+          { path: "/hot-offers", element: <Navigate to="/offers" replace /> },
+          { path: "/app-offers", element: <Navigate to="/offers" replace /> },
+          { path: "/campaigns", element: <Navigate to="/offers" replace /> },
+          // Legacy campaign-claims queue: off the sidebar, reached from the
+          // dashboard card only while old claims are still pending.
           { path: "/claims", element: withSuspense(<ClaimsPage />) },
           { path: "/redemptions", element: withSuspense(<RedemptionsPage />) },
           {
@@ -151,13 +152,12 @@ export const router = createBrowserRouter([
           },
           { path: "/users", element: withSuspense(<UsersPage />) },
           { path: "/referrals", element: withSuspense(<ReferralsPage />) },
+          { path: "/surveys", element: withSuspense(<SurveysPage />) },
           { path: "/wallet", element: withSuspense(<WalletPage />) },
           {
             path: "/notifications",
             element: withSuspense(<NotificationsPage />),
           },
-          { path: "/hot-offers", element: withSuspense(<HotOffersPage />) },
-          { path: "/app-offers", element: withSuspense(<AppOffersPage />) },
           { path: "/missions", element: withSuspense(<MissionsPage />) },
           { path: "/roulette", element: withSuspense(<RoulettePage />) },
           {

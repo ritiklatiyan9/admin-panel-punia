@@ -2,16 +2,14 @@ import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import {
   ChartBarIcon,
+  ClipboardDocumentListIcon,
   BanknotesIcon,
   BellIcon,
-  CheckBadgeIcon,
   ChevronDoubleLeftIcon,
   ChevronDoubleRightIcon,
   Cog6ToothIcon,
-  DevicePhoneMobileIcon,
   FireIcon,
   HomeIcon,
-  MegaphoneIcon,
   PhotoIcon,
   CircleStackIcon,
   FlagIcon,
@@ -45,12 +43,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   {
     title: "Earn",
     items: [
-      { to: "/campaigns", label: "Campaigns", icon: MegaphoneIcon },
-      { to: "/claims", label: "Claims", icon: CheckBadgeIcon },
-      { to: "/hot-offers", label: "Hot Offers", icon: FireIcon },
-      { to: "/app-offers", label: "App Offers", icon: DevicePhoneMobileIcon },
+      // ponytail: one Offers module replaces Hot Offers / App Offers /
+      // Campaigns — old URLs redirect in routes/index.tsx.
+      { to: "/offers", label: "Offers", icon: FireIcon },
       { to: "/missions", label: "Mission Board", icon: FlagIcon },
       { to: "/roulette", label: "Roulette", icon: SparklesIcon },
+      { to: "/surveys", label: "Surveys", icon: ClipboardDocumentListIcon },
       { to: "/referrals", label: "Referrals", icon: UserPlusIcon },
     ],
   },
@@ -118,7 +116,7 @@ export const Sidebar = ({
             : "h-14 items-center gap-2.5 px-4",
         )}
       >
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-primary to-primary-glow text-primary-foreground shadow-[0_0_14px_-2px_hsl(var(--primary)/0.6)]">
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-white dark:bg-emerald-400/10 dark:text-emerald-400">
           <GiftIcon className="h-5 w-5" />
         </div>
         {!collapsed && (
@@ -188,8 +186,7 @@ export const Sidebar = ({
                         "relative flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
                         collapsed ? "justify-center px-0" : "gap-3 px-3",
                         isActive
-                          ? // ponytail: text-primary-foreground, not literal white — white on the neon #05FF08 dark-mode pill is unreadable
-                            "bg-gradient-to-r from-primary to-primary-glow text-primary-foreground shadow-[0_0_18px_-2px_hsl(var(--primary)/0.55)]"
+                          ? "bg-emerald-50 text-emerald-700 ring-1 ring-inset ring-emerald-600/10 dark:bg-emerald-400/10 dark:text-emerald-400 dark:ring-emerald-400/15"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground",
                       )
                     }

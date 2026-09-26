@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -19,7 +19,7 @@ import {
 import { TableSkeleton } from "@/components/shared/TableSkeleton";
 import { Coins } from "@/components/shared/Coins";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { SubmissionStatusBadge } from "@/components/shared/StatusBadge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,19 +35,42 @@ import { apiErrorMessage } from "@/services/api-client";
 import { useAuthStore } from "@/store/auth.store";
 import { formatDateTime } from "@/utils/format";
 import { mediaUrl } from "@/utils/media-url";
+import { OptimizedImage } from "@/components/shared/OptimizedImage";
 import type { OfferSubmission, SubmissionStatus } from "@/types/domain";
+import type { Paginated } from "@/types/api";
 
 const PAGE_SIZE = 10;
 
-const statusBadge: Record<
-  SubmissionStatus,
-  "secondary" | "success" | "destructive" | "warning" | "outline"
-> = {
-  PENDING: "secondary",
-  APPROVED: "success",
-  REJECTED: "destructive",
-  NEED_MORE_PROOF: "warning",
-  CANCELLED: "outline",
+const ProofImage = ({ src }: { src: string }): JSX.Element => {
+  const [loaded, setLoaded] = useState(false);
+  const [failed, setFailed] = useState(false);
+  return (
+    <div className="relative flex h-[60vh] items-center justify-center rounded-lg bg-muted">
+      {!loaded && !failed && (
+        <p role="status" className="absolute text-sm text-muted-foreground">
+          Loading full-size proof…
+        </p>
+      )}
+      {failed ? (
+        <p
+          role="alert"
+          className="p-4 text-center text-sm text-muted-foreground"
+        >
+          This image couldn't load. Try the full-size link below or reopen the
+          preview.
+        </p>
+      ) : (
+        <img
+          src={src}
+          alt="Proof"
+          decoding="async"
+          onLoad={() => setLoaded(true)}
+          onError={() => setFailed(true)}
+          className="h-full w-full rounded-lg object-contain"
+        />
+      )}
+    </div>
+  );
 };
 
 const STATUS_OPTIONS = [
@@ -103,7 +126,9 @@ export const SubmissionsReview = ({
   const [page, setPage] = useState(1);
   const [status, setStatus] = useState<SubmissionStatus | "ALL">("PENDING");
   const [preview, setPreview] = useState<{
+    id: string;
     urls: string[];
+    count: number;
     index: number;
   } | null>(null);
   const [noteFor, setNoteFor] = useState<{
@@ -112,19 +137,77 @@ export const SubmissionsReview = ({
   } | null>(null);
   const [note, setNote] = useState("");
 
-  const { data, isLoading } = useQuery({
-    queryKey: ["hot-offers", "submissions", { page, status, product }],
+  const { data, isLoading, isFetching, isPlaceholderData, isError, refetch } =
+    useQuery({
+      queryKey: ["hot-offers", "submissions", { page, status, product }],
+      queryFn: ({ signal }) =>
+        hotOffersService.listSubmissions(
+          {
+            page,
+            limit: PAGE_SIZE,
+            status: status === "ALL" ? undefined : status,
+            product,
+            preview: true,
+          },
+          signal,
+        ),
+    });
+
+  const details = useQuery({
+    queryKey: ["hot-offers", "submissions", "detail", preview?.id],
     queryFn: ({ signal }) =>
-      hotOffersService.listSubmissions(
-        {
-          page,
-          limit: PAGE_SIZE,
-          status: status === "ALL" ? undefined : status,
-          product,
-        },
-        signal,
-      ),
+      hotOffersService.getSubmission(preview!.id, signal),
+    enabled: !!preview && preview.count > preview.urls.length,
+    // Never show a previous user's screenshots while another proof loads.
+    placeholderData: undefined,
   });
+  const previewUrls = details.data?.screenshotUrls.length
+    ? details.data.screenshotUrls
+    : (preview?.urls ?? []);
+
+  useEffect(() => {
+    if (
+      data &&
+      !isPlaceholderData &&
+      !isFetching &&
+      page > Math.max(1, data.meta.totalPages)
+    ) {
+      setPage(Math.max(1, data.meta.totalPages));
+    }
+  }, [data, isPlaceholderData, isFetching, page]);
+
+  // Update the visible queue from the committed server response immediately;
+  // background invalidation then replenishes the page and refreshes counts.
+  const updateSubmission = (updated: OfferSubmission): void => {
+    queryClient.setQueryData<Paginated<OfferSubmission>>(
+      ["hot-offers", "submissions", { page, status, product }],
+      (current) => {
+        if (!current) return current;
+        const removed =
+          status !== "ALL" &&
+          updated.status !== status &&
+          current.items.some((item) => item.id === updated.id);
+        const total = Math.max(0, current.meta.total - (removed ? 1 : 0));
+        return {
+          items: current.items.flatMap((item) =>
+            item.id !== updated.id
+              ? [item]
+              : removed
+                ? []
+                : [{ ...item, ...updated, user: updated.user ?? item.user }],
+          ),
+          meta: {
+            ...current.meta,
+            total,
+            totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+          },
+        };
+      },
+    );
+    void queryClient.invalidateQueries({
+      queryKey: ["hot-offers", "submissions"],
+    });
+  };
 
   const review = useMutation({
     mutationFn: (input: {
@@ -136,10 +219,8 @@ export const SubmissionsReview = ({
         action: input.action,
         reviewNote: input.reviewNote,
       }),
-    onSuccess: (_, input) => {
-      void queryClient.invalidateQueries({
-        queryKey: ["hot-offers", "submissions"],
-      });
+    onSuccess: (updated, input) => {
+      updateSubmission(updated);
       toast.success(
         input.action === "APPROVE"
           ? "Approved — reward credited to the user"
@@ -155,10 +236,8 @@ export const SubmissionsReview = ({
 
   const reopen = useMutation({
     mutationFn: (id: string) => hotOffersService.reopenSubmission(id),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({
-        queryKey: ["hot-offers", "submissions"],
-      });
+    onSuccess: (updated) => {
+      updateSubmission(updated);
       toast.success("Re-opened — the user can participate in this offer again");
     },
     onError: (error) => toast.error(apiErrorMessage(error)),
@@ -181,9 +260,23 @@ export const SubmissionsReview = ({
           },
         ]}
       >
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-2">
+          <span role="status" className="text-xs text-muted-foreground">
+            {isFetching && !isLoading ? "Updating…" : ""}
+          </span>
+          <Button
+            variant="outline"
+            disabled={isFetching}
+            onClick={() => void refetch()}
+          >
+            <ArrowPathIcon className="mr-1.5 h-4 w-4" /> Refresh
+          </Button>
           <ExportButton
-            rows={(data?.items ?? []) as unknown as Record<string, unknown>[]}
+            rows={
+              (isPlaceholderData
+                ? []
+                : (data?.items ?? [])) as unknown as Record<string, unknown>[]
+            }
             columns={EXPORT_COLUMNS}
             fileName="offer-submissions"
             title="Offer submissions"
@@ -193,9 +286,21 @@ export const SubmissionsReview = ({
         </div>
       </FiltersBar>
 
-      <Card>
+      {isError && data && (
+        <p role="alert" className="mb-3 text-sm text-destructive">
+          Could not refresh proofs. Showing the last loaded page; use Refresh to
+          try again.
+        </p>
+      )}
+      <Card aria-busy={isFetching}>
         {isLoading ? (
           <TableSkeleton />
+        ) : isError && !data ? (
+          <EmptyState
+            title="Couldn't load proofs"
+            description="Check your connection and try again."
+            action={<Button onClick={() => void refetch()}>Try again</Button>}
+          />
         ) : !data || data.items.length === 0 ? (
           <EmptyState
             title="No submissions"
@@ -209,35 +314,49 @@ export const SubmissionsReview = ({
                 const shots = submission.screenshotUrls?.length
                   ? submission.screenshotUrls
                   : [submission.screenshotUrl];
+                const count = submission.screenshotCount ?? shots.length;
+                const openPreview = (index: number): void =>
+                  setPreview({ id: submission.id, urls: shots, index, count });
                 return (
                   <li
                     key={submission.id}
                     className="flex flex-wrap items-center gap-4 p-4"
                   >
                     <div className="flex shrink-0 flex-wrap gap-1.5">
-                      {shots.map((url, index) => (
+                      {shots.slice(0, 3).map((url, index) => (
                         <button
                           key={`${url}-${index}`}
                           type="button"
-                          onClick={() => setPreview({ urls: shots, index })}
+                          onClick={() => openPreview(index)}
                           className="h-20 w-20 overflow-hidden rounded-lg border bg-muted"
-                          title={`View screenshot ${index + 1} of ${shots.length}`}
+                          title={`View screenshot ${index + 1} of ${count}`}
                         >
-                          <img
-                            src={mediaUrl(url)}
+                          <OptimizedImage
+                            src={url}
+                            size={160}
+                            width={80}
+                            height={80}
                             alt={`Proof ${index + 1}`}
                             className="h-full w-full object-cover"
                           />
                         </button>
                       ))}
+                      {count > 3 && (
+                        <button
+                          type="button"
+                          onClick={() => openPreview(0)}
+                          className="h-20 w-20 rounded-lg border bg-muted text-sm font-medium"
+                          title={`View all ${count} screenshots`}
+                        >
+                          +{count - 3} more
+                        </button>
+                      )}
                     </div>
 
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="font-medium">{submission.offerTitle}</p>
-                        <Badge variant={statusBadge[submission.status]}>
-                          {submission.status}
-                        </Badge>
+                        <SubmissionStatusBadge status={submission.status} />
                       </div>
                       <p className="text-sm text-muted-foreground">
                         {submission.user
@@ -268,7 +387,7 @@ export const SubmissionsReview = ({
                               action: "APPROVE",
                             })
                           }
-                          disabled={review.isPending}
+                          disabled={review.isPending || isPlaceholderData}
                         >
                           <CheckIcon className="mr-1 h-4 w-4" /> Approve
                         </Button>
@@ -281,7 +400,7 @@ export const SubmissionsReview = ({
                               action: "NEED_MORE_PROOF",
                             })
                           }
-                          disabled={review.isPending}
+                          disabled={review.isPending || isPlaceholderData}
                         >
                           <QuestionMarkCircleIcon className="mr-1 h-4 w-4" />{" "}
                           Need proof
@@ -292,7 +411,7 @@ export const SubmissionsReview = ({
                           onClick={() =>
                             setNoteFor({ submission, action: "REJECT" })
                           }
-                          disabled={review.isPending}
+                          disabled={review.isPending || isPlaceholderData}
                         >
                           <XMarkIcon className="mr-1 h-4 w-4" /> Reject
                         </Button>
@@ -308,7 +427,7 @@ export const SubmissionsReview = ({
                             size="sm"
                             variant="outline"
                             onClick={() => reopen.mutate(submission.id)}
-                            disabled={reopen.isPending}
+                            disabled={reopen.isPending || isPlaceholderData}
                           >
                             <ArrowPathIcon className="mr-1 h-4 w-4" /> Allow
                             again
@@ -319,7 +438,11 @@ export const SubmissionsReview = ({
                 );
               })}
             </ul>
-            <Pagination meta={data.meta} onPageChange={setPage} />
+            <Pagination
+              meta={data.meta}
+              onPageChange={setPage}
+              disabled={isPlaceholderData}
+            />
           </>
         )}
       </Card>
@@ -329,23 +452,43 @@ export const SubmissionsReview = ({
         open={preview !== null}
         onOpenChange={(open) => !open && setPreview(null)}
       >
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[90vh] max-w-2xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               Proof screenshot
-              {preview && preview.urls.length > 1
-                ? ` ${preview.index + 1} of ${preview.urls.length}`
+              {preview && previewUrls.length > 1
+                ? ` ${preview.index + 1} of ${previewUrls.length}`
                 : ""}
             </DialogTitle>
           </DialogHeader>
           {preview && (
             <>
-              <img
-                src={mediaUrl(preview.urls[preview.index])}
-                alt="Proof"
-                className="max-h-[70vh] w-full rounded-lg object-contain"
+              <ProofImage
+                key={previewUrls[preview.index] ?? previewUrls[0]}
+                src={mediaUrl(previewUrls[preview.index] ?? previewUrls[0])}
               />
-              {preview.urls.length > 1 && (
+              {details.isFetching && (
+                <p role="status" className="text-sm text-muted-foreground">
+                  Loading remaining screenshots…
+                </p>
+              )}
+              {details.isError && (
+                <Button
+                  variant="outline"
+                  onClick={() => void details.refetch()}
+                >
+                  Retry loading all screenshots
+                </Button>
+              )}
+              <a
+                href={mediaUrl(previewUrls[preview.index] ?? previewUrls[0])}
+                target="_blank"
+                rel="noreferrer"
+                className="text-sm underline underline-offset-4"
+              >
+                Open full-size image
+              </a>
+              {previewUrls.length > 1 && (
                 <div className="flex items-center justify-between">
                   <Button
                     variant="outline"
@@ -354,8 +497,8 @@ export const SubmissionsReview = ({
                       setPreview({
                         ...preview,
                         index:
-                          (preview.index - 1 + preview.urls.length) %
-                          preview.urls.length,
+                          (preview.index - 1 + previewUrls.length) %
+                          previewUrls.length,
                       })
                     }
                   >
@@ -367,7 +510,7 @@ export const SubmissionsReview = ({
                     onClick={() =>
                       setPreview({
                         ...preview,
-                        index: (preview.index + 1) % preview.urls.length,
+                        index: (preview.index + 1) % previewUrls.length,
                       })
                     }
                   >

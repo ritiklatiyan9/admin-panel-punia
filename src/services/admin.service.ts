@@ -4,9 +4,11 @@ import type { AdminStats } from "@/types/domain";
 import type { Role, User } from "@/types/user";
 
 export const adminService = {
-  stats: async (): Promise<AdminStats> => {
-    const { data } =
-      await apiClient.get<ApiSuccess<AdminStats>>("/admin/stats");
+  stats: async (signal?: AbortSignal): Promise<AdminStats> => {
+    const { data } = await apiClient.get<ApiSuccess<AdminStats>>(
+      "/admin/stats",
+      { signal },
+    );
     return data.data;
   },
 

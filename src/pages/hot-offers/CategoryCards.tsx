@@ -1,5 +1,4 @@
 import {
-  DocumentTextIcon,
   PencilSquareIcon,
   TagIcon,
   TrashIcon,
@@ -17,20 +16,13 @@ export const CategoryCard = ({
   category,
   canWrite,
   onEdit,
-  onFeedbackPage,
   onDelete,
 }: {
   category: OfferCategory;
   canWrite: boolean;
   onEdit: () => void;
-  onFeedbackPage: () => void;
   onDelete: () => void;
 }): JSX.Element => {
-  const pageButton = (label: string): JSX.Element => (
-    <Button variant="outline" size="sm" onClick={onFeedbackPage}>
-      <DocumentTextIcon className="mr-1 h-3.5 w-3.5" /> {label}
-    </Button>
-  );
   return (
     <Card className="flex flex-col overflow-hidden">
       <div className="relative aspect-video overflow-hidden bg-muted/60">
@@ -67,9 +59,6 @@ export const CategoryCard = ({
             {category.offerCount}{" "}
             {category.offerCount === 1 ? "offer" : "offers"}
           </Badge>
-          {category.hasFeedbackPage && (
-            <Badge variant="info">Feedback page</Badge>
-          )}
           <span className="ml-auto truncate font-mono text-muted-foreground">
             {category.slug}
           </span>
@@ -78,28 +67,22 @@ export const CategoryCard = ({
           <span className="truncate">
             Added {formatDate(category.createdAt)}
           </span>
-          <span className="flex shrink-0 items-center gap-1">
-            {canWrite ? (
-              <>
-                <Button variant="outline" size="sm" onClick={onEdit}>
-                  <PencilSquareIcon className="mr-1 h-3.5 w-3.5" /> Edit
-                </Button>
-                {pageButton(category.hasFeedbackPage ? "Page" : "Create page")}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  onClick={onDelete}
-                  title="Delete"
-                >
-                  <TrashIcon className="h-4 w-4 text-red-500" />
-                </Button>
-              </>
-            ) : (
-              // Viewers can open an existing page read-only, as before.
-              category.hasFeedbackPage && pageButton("View page")
-            )}
-          </span>
+          {canWrite && (
+            <span className="flex shrink-0 items-center gap-1">
+              <Button variant="outline" size="sm" onClick={onEdit}>
+                <PencilSquareIcon className="mr-1 h-3.5 w-3.5" /> Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={onDelete}
+                title="Delete"
+              >
+                <TrashIcon className="h-4 w-4 text-red-500" />
+              </Button>
+            </span>
+          )}
         </div>
       </div>
     </Card>

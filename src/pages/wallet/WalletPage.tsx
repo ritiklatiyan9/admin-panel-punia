@@ -41,7 +41,7 @@ export const WalletPage = (): JSX.Element => {
   const [range, setRange] = useState<DateRangeValue>({ from: "", to: "" });
 
   const wallet = useQuery({ queryKey: ["wallet", "me"], queryFn: walletService.myWallet });
-  const stats = useQuery({ queryKey: ["admin", "stats"], queryFn: adminService.stats });
+  const stats = useQuery({ queryKey: ["admin", "stats"], queryFn: ({ signal }) => adminService.stats(signal) });
   const transactions = useQuery({
     queryKey: ["wallet", "transactions", page],
     queryFn: () => walletService.transactions({ page, limit: PAGE_SIZE }),

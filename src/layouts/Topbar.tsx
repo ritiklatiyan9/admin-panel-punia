@@ -66,6 +66,7 @@ export const Topbar = ({ onMenuClick }: TopbarProps): JSX.Element => {
         variant="ghost"
         size="icon"
         className="lg:hidden"
+        aria-label="Open navigation menu"
         onClick={onMenuClick}
       >
         <Bars3Icon className="h-5 w-5" />
@@ -77,6 +78,7 @@ export const Topbar = ({ onMenuClick }: TopbarProps): JSX.Element => {
           size="icon"
           onClick={toggle}
           title="Toggle theme"
+          aria-label="Toggle theme"
         >
           {theme === "dark" ? (
             <SunIcon className="h-5 w-5" />

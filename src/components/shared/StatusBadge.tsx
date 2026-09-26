@@ -1,12 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { CampaignStatus, ClaimStatus } from "@/types/domain";
-
-const campaignVariants: Record<CampaignStatus, "secondary" | "success" | "warning" | "outline"> = {
-  DRAFT: "secondary",
-  ACTIVE: "success",
-  PAUSED: "warning",
-  ENDED: "outline",
-};
+import type { ClaimStatus, SubmissionStatus } from "@/types/domain";
 
 const claimVariants: Record<ClaimStatus, "warning" | "success" | "destructive"> = {
   PENDING: "warning",
@@ -14,10 +7,23 @@ const claimVariants: Record<ClaimStatus, "warning" | "success" | "destructive"> 
   REJECTED: "destructive",
 };
 
-export const CampaignStatusBadge = ({ status }: { status: CampaignStatus }): JSX.Element => (
-  <Badge variant={campaignVariants[status]}>{status}</Badge>
-);
+const submissionVariants: Record<
+  SubmissionStatus,
+  "secondary" | "success" | "destructive" | "warning" | "outline"
+> = {
+  PENDING: "secondary",
+  APPROVED: "success",
+  REJECTED: "destructive",
+  NEED_MORE_PROOF: "warning",
+  CANCELLED: "outline",
+};
 
 export const ClaimStatusBadge = ({ status }: { status: ClaimStatus }): JSX.Element => (
   <Badge variant={claimVariants[status]}>{status}</Badge>
 );
+
+export const SubmissionStatusBadge = ({
+  status,
+}: {
+  status: SubmissionStatus;
+}): JSX.Element => <Badge variant={submissionVariants[status]}>{status}</Badge>;

@@ -5,9 +5,14 @@ import type { PageMeta } from "@/types/api";
 interface PaginationProps {
   meta: PageMeta;
   onPageChange: (page: number) => void;
+  disabled?: boolean;
 }
 
-export const Pagination = ({ meta, onPageChange }: PaginationProps): JSX.Element | null => {
+export const Pagination = ({
+  meta,
+  onPageChange,
+  disabled = false,
+}: PaginationProps): JSX.Element | null => {
   if (meta.total === 0) return null;
 
   const start = (meta.page - 1) * meta.limit + 1;
@@ -22,7 +27,7 @@ export const Pagination = ({ meta, onPageChange }: PaginationProps): JSX.Element
         <Button
           variant="outline"
           size="sm"
-          disabled={meta.page <= 1}
+          disabled={disabled || meta.page <= 1}
           onClick={() => onPageChange(meta.page - 1)}
         >
           <ChevronLeftIcon className="mr-1 h-4 w-4" /> Prev
@@ -33,7 +38,7 @@ export const Pagination = ({ meta, onPageChange }: PaginationProps): JSX.Element
         <Button
           variant="outline"
           size="sm"
-          disabled={meta.page >= meta.totalPages}
+          disabled={disabled || meta.page >= meta.totalPages}
           onClick={() => onPageChange(meta.page + 1)}
         >
           Next <ChevronRightIcon className="ml-1 h-4 w-4" />

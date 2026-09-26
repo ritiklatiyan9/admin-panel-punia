@@ -1,10 +1,9 @@
 import { apiClient } from "./api-client";
+import { isAxiosError } from "axios";
 import type { ApiSuccess, Paginated } from "@/types/api";
 import type {
   AnalyticsRange,
   ContentStatus,
-  FeedbackPage,
-  FeedbackPageInput,
   FraudOverview,
   HotOffer,
   HotOfferDetails,
@@ -17,13 +16,16 @@ import type {
 } from "@/types/domain";
 
 const BASE = "/hot-offers/admin";
+// A local admin build can be newer than the hosted API during deployment.
+let supportsSubmissionCount = true;
 
 export const hotOffersService = {
   // ---- categories ----
 
-  listCategories: async (): Promise<OfferCategory[]> => {
+  listCategories: async (signal?: AbortSignal): Promise<OfferCategory[]> => {
     const { data } = await apiClient.get<ApiSuccess<OfferCategory[]>>(
       `${BASE}/categories`,
+      { signal },
     );
     return data.data;
   },
@@ -49,28 +51,6 @@ export const hotOffersService = {
 
   deleteCategory: async (id: string): Promise<void> => {
     await apiClient.delete(`${BASE}/categories/${id}`);
-  },
-
-  // ---- feedback pages ----
-
-  getFeedbackPage: async (
-    categorySlug: string,
-  ): Promise<FeedbackPage | null> => {
-    const { data } = await apiClient.get<ApiSuccess<FeedbackPage | null>>(
-      `${BASE}/categories/${categorySlug}/feedback-page`,
-    );
-    return data.data;
-  },
-
-  upsertFeedbackPage: async (
-    categoryId: string,
-    input: FeedbackPageInput,
-  ): Promise<FeedbackPage> => {
-    const { data } = await apiClient.put<ApiSuccess<FeedbackPage>>(
-      `${BASE}/categories/${categoryId}/feedback-page`,
-      input,
-    );
-    return data.data;
   },
 
   // ---- offers ----
@@ -136,6 +116,7 @@ export const hotOffersService = {
       status?: SubmissionStatus;
       /** Filter by the submission's offer.isProduct; omitted = all. */
       product?: boolean;
+      preview?: boolean;
     },
     signal?: AbortSignal,
   ): Promise<Paginated<OfferSubmission>> => {
@@ -147,6 +128,40 @@ export const hotOffersService = {
       },
     );
     return { items: data.data, meta: data.meta! };
+  },
+
+  submissionCount: async (
+    params: { status?: SubmissionStatus; product?: boolean },
+    signal?: AbortSignal,
+  ): Promise<number> => {
+    if (supportsSubmissionCount) {
+      try {
+        const { data } = await apiClient.get<ApiSuccess<{ total: number }>>(
+          `${BASE}/submissions/count`,
+          { params, signal },
+        );
+        return data.data.total;
+      } catch (error) {
+        if (!isAxiosError(error) || error.response?.status !== 404) throw error;
+        supportsSubmissionCount = false;
+      }
+    }
+    const { data } = await apiClient.get<ApiSuccess<OfferSubmission[]>>(
+      `${BASE}/submissions`,
+      { params: { ...params, page: 1, limit: 1 }, signal },
+    );
+    return data.meta!.total;
+  },
+
+  getSubmission: async (
+    id: string,
+    signal?: AbortSignal,
+  ): Promise<OfferSubmission> => {
+    const { data } = await apiClient.get<ApiSuccess<OfferSubmission>>(
+      `${BASE}/submissions/${id}`,
+      { signal },
+    );
+    return data.data;
   },
 
   reviewSubmission: async (
@@ -182,11 +197,15 @@ export const hotOffersService = {
 
   // ---- analytics ----
 
-  analytics: async (range: AnalyticsRange): Promise<HotOffersAnalytics> => {
+  analytics: async (
+    range: AnalyticsRange,
+    signal?: AbortSignal,
+  ): Promise<HotOffersAnalytics> => {
     const { data } = await apiClient.get<ApiSuccess<HotOffersAnalytics>>(
       `${BASE}/analytics`,
       {
         params: { range },
+        signal,
       },
     );
     return data.data;

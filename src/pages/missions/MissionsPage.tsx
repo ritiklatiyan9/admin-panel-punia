@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { PlusIcon } from "@heroicons/react/24/outline";
@@ -58,7 +59,20 @@ export const MissionsPage = (): JSX.Element => {
   const queryClient = useQueryClient();
   const canWrite = useAuthStore((state) => state.user?.role === "SUPER_ADMIN");
 
-  const [tab, setTab] = useState<Tab>("missions");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const tab: Tab =
+    requestedTab === "completions" || requestedTab === "game"
+      ? requestedTab
+      : "missions";
+  const setTab = (next: Tab): void => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      if (next === "missions") params.delete("tab");
+      else params.set("tab", next);
+      return params;
+    });
+  };
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ContentStatus | "ALL">(

@@ -4,6 +4,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { Artwork } from "@/components/shared/app-preview";
+import { OptimizedImage } from "@/components/shared/OptimizedImage";
 import { Coins } from "@/components/shared/Coins";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +23,13 @@ export const statusBadge: Record<
   DRAFT: "secondary",
   PUBLISHED: "success",
   ARCHIVED: "outline",
+};
+
+/** Offer status in app terms — "draft" alone never said the offer is invisible. */
+const statusLabel: Record<ContentStatus, string> = {
+  DRAFT: "Draft · hidden",
+  PUBLISHED: "Live",
+  ARCHIVED: "Archived · hidden",
 };
 
 /** Expiry chip, only when it changes what an admin should do about the item. */
@@ -83,9 +91,12 @@ export const OfferCard = ({
           />
         </div>
         <div className="absolute left-2 top-2 flex flex-wrap gap-1">
-          <Badge variant={statusBadge[offer.status]} className="capitalize">
-            {offer.status.toLowerCase()}
+          <Badge variant={statusBadge[offer.status]}>
+            {statusLabel[offer.status]}
           </Badge>
+          {offer.isProduct && (
+            <Badge className="bg-card text-foreground shadow-sm">Home</Badge>
+          )}
           {expiry && <Badge variant={expiry.variant}>{expiry.label}</Badge>}
         </div>
         <div className="absolute right-2 top-2 flex gap-1">
@@ -95,8 +106,11 @@ export const OfferCard = ({
           )}
         </div>
         {offer.brandLogoUrl && (
-          <img
+          <OptimizedImage
             src={offer.brandLogoUrl}
+            size={160}
+            width={36}
+            height={36}
             alt=""
             className="absolute bottom-2 left-2 h-9 w-9 rounded-full border bg-card object-contain p-0.5 shadow-sm"
             onError={(e) => (e.currentTarget.style.display = "none")}
@@ -114,7 +128,7 @@ export const OfferCard = ({
         <div className="mt-auto flex items-center justify-between gap-2 text-sm">
           <span className="flex items-baseline gap-1.5">
             <Coins value={offer.rewardAmount} className="font-semibold" />
-            <span className="text-xs text-muted-foreground">credited</span>
+            <span className="text-xs text-muted-foreground">earned</span>
           </span>
           <span className="truncate text-xs text-muted-foreground">
             {offer.appName ?? offer.category.title}

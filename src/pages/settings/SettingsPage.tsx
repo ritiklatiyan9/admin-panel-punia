@@ -22,6 +22,7 @@ import { useThemeStore } from "@/store/theme.store";
 import { LevelsCoinsSettings } from "./LevelsCoinsSettings";
 import { RewardProvidersSettings } from "./RewardProvidersSettings";
 import { CoinPurchaseSettings } from "./CoinPurchaseSettings";
+import { SettingsGroupCard } from "@/components/shared/SettingsGroupCard";
 
 /** Settings-registry key for the Telegram link (edited via the settings PATCH flow). */
 const TELEGRAM_SETTING_KEY = "social.telegramUrl";
@@ -33,6 +34,7 @@ const TABS = [
   { key: "levels", label: "Levels & Coins" },
   { key: "add-coins", label: "Add Coins" },
   { key: "providers", label: "Reward Providers" },
+  { key: "ads", label: "Ads" },
 ] as const;
 type Tab = (typeof TABS)[number]["key"];
 
@@ -147,6 +149,29 @@ export const SettingsPage = (): JSX.Element => {
       {tab === "add-coins" && <CoinPurchaseSettings />}
 
       {tab === "providers" && <RewardProvidersSettings />}
+
+      {tab === "ads" && (
+        <SettingsGroupCard
+          prefix="ads."
+          enabledKey="ads.enabled"
+          title="Google AdMob"
+          description={
+            <>
+              Banner on the app Home screen (AdMob app ca-app-pub-2061747225651398~1021900568).
+              Revenue and fill rate are in the{" "}
+              <a
+                className="underline"
+                href="https://admob.google.com/v2/home"
+                target="_blank"
+                rel="noreferrer"
+              >
+                AdMob console
+              </a>
+              .
+            </>
+          }
+        />
+      )}
 
       <div className={tab === "account" ? "space-y-6" : "hidden"}>
         <Card>

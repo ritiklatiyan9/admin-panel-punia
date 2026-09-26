@@ -1,0 +1,58 @@
+.dashboard {
+  --dashboard-green: #047857;
+  --dashboard-blue: #0284c7;
+  --dashboard-purple: #8b5cf6;
+  --dashboard-muted: #64748b;
+  --dashboard-surface: #fff;
+  --primary: 161 94% 24%;
+  --primary-glow: 161 94% 24%;
+  --ring: 161 94% 24%;
+}
+.dark .dashboard {
+  --dashboard-green: #34d399;
+  --dashboard-blue: #38bdf8;
+  --dashboard-purple: #a78bfa;
+  --dashboard-muted: #94a3b8;
+  --dashboard-surface: #151c2c;
+  --primary: 158 64% 52%;
+  --primary-glow: 158 64% 52%;
+  --ring: 158 64% 52%;
+}
+.dashboard-panel {
+  min-width: 0;
+  border: 1px solid hsl(var(--border));
+  border-radius: 16px;
+  background: hsl(var(--card));
+  box-shadow: 0 2px 8px -5px rgb(15 23 42 / 0.12);
+}
+.dashboard-module {
+  background: hsl(var(--card));
+  transition: background 150ms;
+}
+.dashboard-module:hover {
+  background: hsl(var(--muted));
+}
+.dashboard :is(button, a, input, summary):focus-visible {
+  outline: 2px solid var(--dashboard-green);
+  outline-offset: 3px;
+}
+.dashboard input[type="search"]:focus-visible {
+  outline-offset: 6px;
+}
+.dashboard-metric {
+  transition:
+    border-color 150ms,
+    background 150ms;
+}
+.dashboard-metric:hover {
+  border-color: var(--dashboard-green);
+  background: hsl(var(--muted) / 0.35);
+}
+@media (prefers-reduced-motion: reduce) {
+  .dashboard *,
+  .dashboard *::before,
+  .dashboard *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -1,0 +1,1 @@
+import{j as s}from"./vendor-DEpDM_qN.js";import{B as n}from"./badge-DHrNsqsF.js";const i={DRAFT:"secondary",ACTIVE:"success",PAUSED:"warning",ENDED:"outline"},r={PENDING:"warning",APPROVED:"success",REJECTED:"destructive"},e=({status:a})=>s.jsx(n,{variant:i[a],children:a}),o=({status:a})=>s.jsx(n,{variant:r[a],children:a});export{o as C,e as a};

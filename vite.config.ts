@@ -18,7 +18,9 @@ export default defineConfig({
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom"],
           firebase: ["firebase/app", "firebase/auth"],
-          vendor: ["@tanstack/react-query", "axios", "react-hook-form", "zod", "zustand"],
+          vendor: ["@tanstack/react-query", "axios", "zustand"],
+          // Form validation is only needed by Settings; keep it off every other route.
+          forms: ["react-hook-form", "zod"],
         },
       },
     },

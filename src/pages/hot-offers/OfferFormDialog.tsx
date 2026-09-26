@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { ChevronDownIcon } from "@heroicons/react/24/outline";
 import {
   Dialog,
   DialogContent,
@@ -10,7 +11,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -32,6 +32,7 @@ import type {
   OfferCategory,
   OfferDifficulty,
 } from "@/types/domain";
+import { Field, STATUS_NOTE, Section } from "./EditorFields";
 import { ImageUrlField } from "./ImageUrlField";
 import { OfferPreview, type OfferPreviewDraft } from "./OfferPreview";
 
@@ -92,10 +93,11 @@ const str = (value: number | null | undefined): string =>
 const numOrNull = (value: string): number | null =>
   value.trim() === "" ? null : Number(value);
 
+// New offers start live and featured on Home — a saved offer should show up
+// in the app without hunting for a status field.
 const toDraft = (
   d: HotOfferDetails | undefined,
   fallbackCategoryId: string,
-  lockProduct: boolean,
 ): Draft => ({
   categoryId: d?.category.id ?? fallbackCategoryId,
   title: d?.title ?? "",
@@ -108,7 +110,7 @@ const toDraft = (
   requirements: (d?.requirements ?? []).join("\n"),
   terms: d?.terms ?? "",
   warning: d?.warning ?? "",
-  rewardAmount: str(d?.rewardAmount ?? 0),
+  rewardAmount: str(d?.rewardAmount),
   rewardCoins: str(d?.rewardCoins ?? 0),
   rewardLabel: d?.rewardLabel ?? "",
   difficulty: d?.difficulty ?? "EASY",
@@ -121,22 +123,23 @@ const toDraft = (
   brandLogoUrl: d?.brandLogoUrl ?? "",
   featured: d?.featured ?? false,
   trending: d?.trending ?? false,
-  isProduct: lockProduct || (d?.isProduct ?? false),
+  isProduct: d?.isProduct ?? true,
   expiresAt: toLocalInput(d?.expiresAt ?? null),
   maxUsers: str(d?.maxUsers),
   maxRewards: str(d?.maxRewards),
   dailyLimit: str(d?.dailyLimit),
   priority: str(d?.priority ?? 0),
-  status: d?.status ?? "DRAFT",
+  status: d?.status ?? "PUBLISHED",
   completedBehavior: d?.completedBehavior ?? "SHOW",
 });
 
-const toInput = (f: Draft, lockProduct: boolean): HotOfferInput => ({
+const toInput = (f: Draft): HotOfferInput => ({
   categoryId: f.categoryId,
   title: f.title.trim(),
   appName: f.appName.trim() || null,
   shortDescription: f.shortDescription.trim(),
-  description: f.description.trim(),
+  // The API requires a long description; the card line is a fine default.
+  description: f.description.trim() || f.shortDescription.trim(),
   taskDescription: f.taskDescription.trim() || null,
   features: linesToList(f.features),
   instructions: linesToList(f.instructions),
@@ -155,7 +158,7 @@ const toInput = (f: Draft, lockProduct: boolean): HotOfferInput => ({
   bannerUrl: f.bannerUrl.trim() || null,
   featured: f.featured,
   trending: f.trending,
-  isProduct: lockProduct || f.isProduct,
+  isProduct: f.isProduct,
   brandLogoUrl: f.brandLogoUrl.trim() || null,
   expiresAt: f.expiresAt ? new Date(f.expiresAt).toISOString() : null,
   maxUsers: numOrNull(f.maxUsers),
@@ -166,47 +169,30 @@ const toInput = (f: Draft, lockProduct: boolean): HotOfferInput => ({
   status: f.status,
 });
 
-const Section = ({
+/** The category offers land in unless the admin picks another one. */
+const defaultCategoryId = (categories: OfferCategory[]): string =>
+  (categories.find((c) => c.slug === "feedback-zone") ?? categories[0])?.id ??
+  "";
+
+const ToggleRow = ({
+  checked,
+  onChange,
   title,
   hint,
-  children,
 }: {
+  checked: boolean;
+  onChange: (value: boolean) => void;
   title: string;
-  hint?: string;
-  children: ReactNode;
+  hint: string;
 }): JSX.Element => (
-  <section className="space-y-3">
-    <div>
-      <h3 className="text-sm font-semibold">{title}</h3>
-      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-    </div>
-    {children}
-  </section>
+  <label className="flex cursor-pointer items-start justify-between gap-4 rounded-lg border p-3">
+    <span>
+      <span className="block text-sm font-medium">{title}</span>
+      <span className="block text-xs text-muted-foreground">{hint}</span>
+    </span>
+    <Switch checked={checked} onCheckedChange={onChange} />
+  </label>
 );
-
-const Field = ({
-  label,
-  htmlFor,
-  hint,
-  children,
-}: {
-  label: ReactNode;
-  htmlFor?: string;
-  hint?: string;
-  children: ReactNode;
-}): JSX.Element => (
-  <div className="space-y-1.5">
-    <Label htmlFor={htmlFor}>{label}</Label>
-    {children}
-    {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-  </div>
-);
-
-const STATUS_NOTE: Record<ContentStatus, string> = {
-  DRAFT: "Saved as a draft — hidden from users.",
-  PUBLISHED: "Visible to users as soon as you save.",
-  ARCHIVED: "Archived — hidden from users.",
-};
 
 interface OfferFormDialogProps {
   open: boolean;
@@ -214,8 +200,6 @@ interface OfferFormDialogProps {
   categories: OfferCategory[];
   /** null = create; otherwise the list row — full details are fetched here. */
   offer: HotOffer | null;
-  /** App Offers module: force isProduct=true and surface the brand logo first. */
-  lockProduct?: boolean;
 }
 
 export const OfferFormDialog = ({
@@ -223,7 +207,6 @@ export const OfferFormDialog = ({
   onOpenChange,
   categories,
   offer,
-  lockProduct = false,
 }: OfferFormDialogProps): JSX.Element => {
   const queryClient = useQueryClient();
 
@@ -233,9 +216,9 @@ export const OfferFormDialog = ({
     enabled: open && offer !== null,
   });
 
-  const fallbackCategoryId = offer?.category.id ?? categories[0]?.id ?? "";
+  const fallbackCategoryId = offer?.category.id ?? defaultCategoryId(categories);
   const [form, setForm] = useState<Draft>(() =>
-    toDraft(undefined, fallbackCategoryId, lockProduct),
+    toDraft(undefined, fallbackCategoryId),
   );
   const set =
     <K extends keyof Draft>(key: K) =>
@@ -255,32 +238,37 @@ export const OfferFormDialog = ({
           offer.id,
         ])
       : undefined;
-    setForm(toDraft(data, fallbackCategoryId, lockProduct));
-  }, [open, loaded, offer, queryClient, fallbackCategoryId, lockProduct]);
+    setForm(toDraft(data, fallbackCategoryId));
+  }, [open, loaded, offer, queryClient, fallbackCategoryId]);
 
   const save = useMutation({
     mutationFn: () => {
-      const input = toInput(form, lockProduct);
+      const input = toInput(form);
       return offer
         ? hotOffersService.updateOffer(offer.id, input)
         : hotOffersService.createOffer(input);
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       void queryClient.invalidateQueries({ queryKey: ["hot-offers"] });
-      toast.success(offer ? "Offer updated" : "Offer created");
+      toast.success(
+        saved.status === "PUBLISHED"
+          ? offer
+            ? "Offer updated — live in the app"
+            : "Offer is live in the app's Feedback Zone"
+          : "Saved as a draft — hidden from users until you turn on “Live in the app”",
+      );
       onOpenChange(false);
     },
     onError: (error) => toast.error(apiErrorMessage(error)),
   });
 
-  const isProduct = lockProduct || form.isProduct;
   const preview: OfferPreviewDraft = {
     title: form.title,
     appName: form.appName,
     categoryTitle:
       categories.find((category) => category.id === form.categoryId)?.title ??
       "",
-    description: form.description,
+    description: form.description || form.shortDescription,
     features: linesToList(form.features),
     instructions: linesToList(form.instructions),
     requirements: linesToList(form.requirements),
@@ -298,19 +286,10 @@ export const OfferFormDialog = ({
     brandLogoUrl: form.brandLogoUrl,
     featured: form.featured,
     trending: form.trending,
-    isProduct,
+    isProduct: form.isProduct,
   };
 
-  const noun = lockProduct ? "app offer" : "offer";
-
-  const brandLogoField = (
-    <ImageUrlField
-      label="Brand logo"
-      value={form.brandLogoUrl}
-      onChange={set("brandLogoUrl")}
-      hint="Brand chip on the offer page; home card art when there is no thumbnail."
-    />
-  );
+  const noCategory = form.categoryId === "";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -323,13 +302,10 @@ export const OfferFormDialog = ({
           {/* ---- form ---- */}
           <div className="flex min-h-0 flex-col">
             <DialogHeader className="border-b px-6 pb-4 pt-6">
-              <DialogTitle>
-                {offer ? `Edit ${noun}` : `New ${noun}`}
-              </DialogTitle>
+              <DialogTitle>{offer ? "Edit offer" : "Add offer"}</DialogTitle>
               <DialogDescription>
-                {lockProduct
-                  ? "Shown on the app home rail, the Explore grid and its own offer page — the preview on the right is what users see."
-                  : "One offer powers an Explore card and its offer page, ending at its Play Store URL."}
+                Fill the basics and save — it shows in the app&apos;s Feedback
+                Zone right away. Everything under “More options” is optional.
               </DialogDescription>
             </DialogHeader>
 
@@ -364,34 +340,6 @@ export const OfferFormDialog = ({
                   }}
                 >
                   <Section title="Basics">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Category">
-                        <Select
-                          value={form.categoryId}
-                          onValueChange={set("categoryId")}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Pick a category" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {categories.map((category) => (
-                              <SelectItem key={category.id} value={category.id}>
-                                {category.title}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="App / brand name" htmlFor="of-app">
-                        <Input
-                          id="of-app"
-                          maxLength={120}
-                          value={form.appName}
-                          onChange={(e) => set("appName")(e.target.value)}
-                          placeholder="e.g. Zepto"
-                        />
-                      </Field>
-                    </div>
                     <Field label="Title" htmlFor="of-title">
                       <Input
                         id="of-title"
@@ -399,85 +347,31 @@ export const OfferFormDialog = ({
                         maxLength={140}
                         value={form.title}
                         onChange={(e) => set("title")(e.target.value)}
-                        placeholder="e.g. Order groceries on Zepto"
+                        placeholder="e.g. Install Zepto & place your first order"
                       />
                     </Field>
                     <Field
-                      label="Card description (short)"
-                      htmlFor="of-short"
-                      hint={`${form.shortDescription.length}/200 characters · shown under the title on cards`}
+                      label="App link"
+                      htmlFor="of-link"
+                      hint="Where the “Get app” button sends users. Play Store links also let the app detect the install; any https link (referral or tracking link) works too."
                     >
                       <Input
-                        id="of-short"
+                        id="of-link"
+                        type="url"
                         required
-                        maxLength={200}
-                        value={form.shortDescription}
-                        onChange={(e) =>
-                          set("shortDescription")(e.target.value)
-                        }
+                        maxLength={2048}
+                        pattern="https?://.+"
+                        title="Must start with https:// (or http://)"
+                        value={form.playStoreUrl}
+                        onChange={(e) => set("playStoreUrl")(e.target.value)}
+                        placeholder="https://play.google.com/store/apps/details?id=com.zepto.app"
                       />
                     </Field>
-                    <Field label="Full description" htmlFor="of-desc">
-                      <Textarea
-                        id="of-desc"
-                        required
-                        rows={4}
-                        maxLength={10_000}
-                        value={form.description}
-                        onChange={(e) => set("description")(e.target.value)}
-                      />
-                    </Field>
-                    <Field
-                      label="Task (what the user must do to earn)"
-                      htmlFor="of-task"
-                    >
-                      <Textarea
-                        id="of-task"
-                        rows={2}
-                        maxLength={2000}
-                        value={form.taskDescription}
-                        onChange={(e) => set("taskDescription")(e.target.value)}
-                        placeholder="e.g. Install and place your first order within 3 days"
-                      />
-                    </Field>
-                  </Section>
-
-                  <Section
-                    title="Media"
-                    hint="Upload or paste a URL. The preview updates as each image loads."
-                  >
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {lockProduct && (
-                        <div className="sm:col-span-2">{brandLogoField}</div>
-                      )}
-                      <ImageUrlField
-                        label="Thumbnail (card art)"
-                        value={form.thumbnailUrl}
-                        onChange={set("thumbnailUrl")}
-                        hint="Home card (contained) and Explore card (16:9, cropped)."
-                      />
-                      <ImageUrlField
-                        label="Logo"
-                        value={form.logoUrl}
-                        onChange={set("logoUrl")}
-                        hint="Offer page identity; card art fallback when there is no thumbnail."
-                      />
-                      <ImageUrlField
-                        label="Banner (offer page hero)"
-                        value={form.bannerUrl}
-                        onChange={set("bannerUrl")}
-                        hint="Top of the offer page. Falls back to thumbnail, then logo."
-                      />
-                      {!lockProduct && brandLogoField}
-                    </div>
-                  </Section>
-
-                  <Section title="Reward">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <div className="grid gap-3 sm:grid-cols-2">
                       <Field
-                        label="Coins credited on approval"
+                        label="Coins earned"
                         htmlFor="of-reward"
-                        hint="What the wallet receives."
+                        hint="Added to the user's wallet when you approve their proof."
                       >
                         <Input
                           id="of-reward"
@@ -488,298 +382,427 @@ export const OfferFormDialog = ({
                           step="0.01"
                           value={form.rewardAmount}
                           onChange={(e) => set("rewardAmount")(e.target.value)}
+                          placeholder="50"
                         />
                       </Field>
-                      <Field
-                        label="Coins shown in app"
-                        htmlFor="of-coins"
-                        hint="Optional. 0 = show the credited amount."
-                      >
+                      <Field label="App name" htmlFor="of-app">
                         <Input
-                          id="of-coins"
-                          type="number"
-                          min={0}
-                          max={10_000_000}
-                          step={1}
-                          value={form.rewardCoins}
-                          onChange={(e) => set("rewardCoins")(e.target.value)}
+                          id="of-app"
+                          maxLength={120}
+                          value={form.appName}
+                          onChange={(e) => set("appName")(e.target.value)}
+                          placeholder="e.g. Zepto"
                         />
                       </Field>
-                      <Field
-                        label="Website reward label"
-                        htmlFor="of-reward-label"
-                        hint="Optional. Replaces the number on the offer page."
-                      >
-                        <Input
-                          id="of-reward-label"
-                          maxLength={80}
-                          value={form.rewardLabel}
-                          onChange={(e) => set("rewardLabel")(e.target.value)}
-                          placeholder="₹50 cashback"
-                        />
-                      </Field>
-                      <Field label="Difficulty">
-                        <Select
-                          value={form.difficulty}
-                          onValueChange={(value) =>
-                            set("difficulty")(value as OfferDifficulty)
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="EASY">Easy</SelectItem>
-                            <SelectItem value="MEDIUM">Medium</SelectItem>
-                            <SelectItem value="HARD">Hard</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field label="Estimated time" htmlFor="of-time">
-                        <Input
-                          id="of-time"
-                          maxLength={40}
-                          value={form.estimatedTime}
-                          onChange={(e) => set("estimatedTime")(e.target.value)}
-                          placeholder="10 min"
-                        />
-                      </Field>
-                      <Field label="Rating (0–5)" htmlFor="of-rating">
-                        <Input
-                          id="of-rating"
-                          type="number"
-                          min={0}
-                          max={5}
-                          step="0.1"
-                          value={form.rating}
-                          onChange={(e) => set("rating")(e.target.value)}
-                          placeholder="4.5"
-                        />
-                      </Field>
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Play Store & limits"
-                    hint="Caps are enforced by the submission guard; blank means unlimited."
-                  >
-                    <Field label="Play Store URL" htmlFor="of-store">
-                      <Input
-                        id="of-store"
-                        type="url"
-                        required
-                        maxLength={2048}
-                        pattern="https://play\.google\.com/.*"
-                        title="Must start with https://play.google.com/"
-                        value={form.playStoreUrl}
-                        onChange={(e) => set("playStoreUrl")(e.target.value)}
-                        placeholder="https://play.google.com/store/apps/details?id=com.xyz.app"
-                      />
-                    </Field>
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <Field label="Offer expiry" htmlFor="of-expiry">
-                        <Input
-                          id="of-expiry"
-                          type="datetime-local"
-                          value={form.expiresAt}
-                          onChange={(e) => set("expiresAt")(e.target.value)}
-                        />
-                      </Field>
-                      <Field label="Max users" htmlFor="of-max-users">
-                        <Input
-                          id="of-max-users"
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={form.maxUsers}
-                          onChange={(e) => set("maxUsers")(e.target.value)}
-                          placeholder="∞"
-                        />
-                      </Field>
-                      <Field label="Max rewards" htmlFor="of-max-rewards">
-                        <Input
-                          id="of-max-rewards"
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={form.maxRewards}
-                          onChange={(e) => set("maxRewards")(e.target.value)}
-                          placeholder="∞"
-                        />
-                      </Field>
-                      <Field label="Daily limit / user" htmlFor="of-daily">
-                        <Input
-                          id="of-daily"
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={form.dailyLimit}
-                          onChange={(e) => set("dailyLimit")(e.target.value)}
-                          placeholder="∞"
-                        />
-                      </Field>
-                    </div>
-                  </Section>
-
-                  <Section
-                    title="Offer page content"
-                    hint="One item per line, up to 20 lines each. Empty sections are hidden on the page."
-                  >
-                    <div className="grid gap-3 sm:grid-cols-3">
-                      <Field
-                        label="How to complete it"
-                        htmlFor="of-instructions"
-                      >
-                        <Textarea
-                          id="of-instructions"
-                          rows={5}
-                          value={form.instructions}
-                          onChange={(e) => set("instructions")(e.target.value)}
-                          placeholder={
-                            "Install the app\nSign up with your number\nPlace your first order"
-                          }
-                        />
-                      </Field>
-                      <Field label="Features" htmlFor="of-features">
-                        <Textarea
-                          id="of-features"
-                          rows={5}
-                          value={form.features}
-                          onChange={(e) => set("features")(e.target.value)}
-                        />
-                      </Field>
-                      <Field label="Requirements" htmlFor="of-requirements">
-                        <Textarea
-                          id="of-requirements"
-                          rows={5}
-                          value={form.requirements}
-                          onChange={(e) => set("requirements")(e.target.value)}
-                          placeholder={"New users only\nIndia only"}
-                        />
-                      </Field>
-                    </div>
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <Field label="Terms" htmlFor="of-terms">
-                        <Textarea
-                          id="of-terms"
-                          rows={2}
-                          maxLength={5000}
-                          value={form.terms}
-                          onChange={(e) => set("terms")(e.target.value)}
-                        />
-                      </Field>
-                      <Field label="Warning" htmlFor="of-warning">
-                        <Textarea
-                          id="of-warning"
-                          rows={2}
-                          maxLength={1000}
-                          value={form.warning}
-                          onChange={(e) => set("warning")(e.target.value)}
-                          placeholder="Shown in red on the offer page"
-                        />
-                      </Field>
-                    </div>
-                  </Section>
-
-                  <Section title="Publishing">
-                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                      <Field label="Status">
-                        <Select
-                          value={form.status}
-                          onValueChange={(value) =>
-                            set("status")(value as ContentStatus)
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="DRAFT">Draft</SelectItem>
-                            <SelectItem value="PUBLISHED">Published</SelectItem>
-                            <SelectItem value="ARCHIVED">Archived</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </Field>
-                      <Field
-                        label="Priority"
-                        htmlFor="of-priority"
-                        hint="Higher sorts first."
-                      >
-                        <Input
-                          id="of-priority"
-                          type="number"
-                          min={0}
-                          max={10_000}
-                          step={1}
-                          value={form.priority}
-                          onChange={(e) => set("priority")(e.target.value)}
-                        />
-                      </Field>
-                      <div className="col-span-2 flex flex-wrap items-center gap-x-5 gap-y-3 pt-6">
-                        <label className="flex cursor-pointer items-center gap-2 text-sm">
-                          <Switch
-                            checked={form.featured}
-                            onCheckedChange={set("featured")}
-                          />
-                          Featured
-                        </label>
-                        <label className="flex cursor-pointer items-center gap-2 text-sm">
-                          <Switch
-                            checked={form.trending}
-                            onCheckedChange={set("trending")}
-                          />
-                          Trending
-                          <span className="text-xs text-muted-foreground">
-                            (“HOT” ribbon)
-                          </span>
-                        </label>
-                        <label className="flex cursor-pointer items-center gap-2 text-sm">
-                          <Switch
-                            checked={isProduct}
-                            onCheckedChange={set("isProduct")}
-                            disabled={lockProduct}
-                          />
-                          Product offer
-                          <span className="text-xs text-muted-foreground">
-                            {lockProduct ? "(always on here)" : "(home rail)"}
-                          </span>
-                        </label>
-                      </div>
                     </div>
                     <Field
-                      label="After a user completes this offer"
-                      hint="Applies once their proof is approved. Other users are unaffected."
+                      label="One-line description"
+                      htmlFor="of-short"
+                      hint={`${form.shortDescription.length}/200 · shown under the title on cards`}
                     >
-                      <Select
-                        value={form.completedBehavior}
-                        onValueChange={(value) =>
-                          set("completedBehavior")(value as CompletedBehavior)
+                      <Input
+                        id="of-short"
+                        required
+                        maxLength={200}
+                        value={form.shortDescription}
+                        onChange={(e) =>
+                          set("shortDescription")(e.target.value)
                         }
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="SHOW">
-                            Keep showing the offer normally
-                          </SelectItem>
-                          <SelectItem value="HIDE">
-                            Hide the offer from them
-                          </SelectItem>
-                          <SelectItem value="SHOW_COMPLETED">
-                            Show with a disabled &quot;Completed&quot; button
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
+                        placeholder="e.g. Groceries in 10 minutes — try it and share your feedback"
+                      />
+                    </Field>
+                    <ImageUrlField
+                      label="Card image"
+                      value={form.thumbnailUrl}
+                      onChange={set("thumbnailUrl")}
+                      hint="Upload or paste a URL. Shown on the offer card (16:9 works best)."
+                    />
+                    <Field
+                      label="Steps to complete"
+                      htmlFor="of-instructions"
+                      hint="One step per line — shown on the offer page."
+                    >
+                      <Textarea
+                        id="of-instructions"
+                        rows={4}
+                        value={form.instructions}
+                        onChange={(e) => set("instructions")(e.target.value)}
+                        placeholder={
+                          "Install the app\nSign up with your number\nTake a screenshot of your first order"
+                        }
+                      />
                     </Field>
                   </Section>
+
+                  <Section title="Where it shows">
+                    <ToggleRow
+                      checked={form.status === "PUBLISHED"}
+                      onChange={(live) =>
+                        set("status")(live ? "PUBLISHED" : "DRAFT")
+                      }
+                      title="Live in the app"
+                      hint="On = users see it in the Feedback Zone list and Explore. Off = draft, hidden."
+                    />
+                    <ToggleRow
+                      checked={form.isProduct}
+                      onChange={set("isProduct")}
+                      title="Also feature on the Home screen"
+                      hint="Adds it to the Home → “App offers” row."
+                    />
+                  </Section>
+
+                  <details className="group rounded-lg border">
+                    <summary className="flex cursor-pointer select-none items-center gap-2 px-4 py-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+                      More options
+                      <span className="truncate text-xs font-normal text-muted-foreground">
+                        category, more images, limits, badges, page text
+                      </span>
+                      <ChevronDownIcon className="ml-auto h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+                    </summary>
+
+                    <div className="space-y-7 border-t px-4 py-5">
+                      <Section title="Details">
+                        <Field
+                          label="Category"
+                          hint="Small label above the title on the offer card."
+                        >
+                          <Select
+                            value={form.categoryId}
+                            onValueChange={set("categoryId")}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Pick a category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {categories.map((category) => (
+                                <SelectItem
+                                  key={category.id}
+                                  value={category.id}
+                                >
+                                  {category.title}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                        <Field
+                          label="Full description"
+                          htmlFor="of-desc"
+                          hint="Offer page body. Blank = uses the one-line description."
+                        >
+                          <Textarea
+                            id="of-desc"
+                            rows={4}
+                            maxLength={10_000}
+                            value={form.description}
+                            onChange={(e) =>
+                              set("description")(e.target.value)
+                            }
+                          />
+                        </Field>
+                        <Field
+                          label="Task (what the user must do to earn)"
+                          htmlFor="of-task"
+                        >
+                          <Textarea
+                            id="of-task"
+                            rows={2}
+                            maxLength={2000}
+                            value={form.taskDescription}
+                            onChange={(e) =>
+                              set("taskDescription")(e.target.value)
+                            }
+                            placeholder="e.g. Install and place your first order within 3 days"
+                          />
+                        </Field>
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          <Field
+                            label="Features"
+                            htmlFor="of-features"
+                            hint="One per line."
+                          >
+                            <Textarea
+                              id="of-features"
+                              rows={4}
+                              value={form.features}
+                              onChange={(e) =>
+                                set("features")(e.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field
+                            label="Requirements"
+                            htmlFor="of-requirements"
+                            hint="One per line."
+                          >
+                            <Textarea
+                              id="of-requirements"
+                              rows={4}
+                              value={form.requirements}
+                              onChange={(e) =>
+                                set("requirements")(e.target.value)
+                              }
+                              placeholder={"New users only\nIndia only"}
+                            />
+                          </Field>
+                          <Field label="Terms" htmlFor="of-terms">
+                            <Textarea
+                              id="of-terms"
+                              rows={2}
+                              maxLength={5000}
+                              value={form.terms}
+                              onChange={(e) => set("terms")(e.target.value)}
+                            />
+                          </Field>
+                          <Field label="Warning" htmlFor="of-warning">
+                            <Textarea
+                              id="of-warning"
+                              rows={2}
+                              maxLength={1000}
+                              value={form.warning}
+                              onChange={(e) => set("warning")(e.target.value)}
+                              placeholder="Shown in red on the offer page"
+                            />
+                          </Field>
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="More images"
+                        hint="All optional — cards fall back to the card image."
+                      >
+                        <div className="grid gap-4 sm:grid-cols-2">
+                          <ImageUrlField
+                            label="Logo"
+                            value={form.logoUrl}
+                            onChange={set("logoUrl")}
+                            hint="Offer page identity."
+                          />
+                          <ImageUrlField
+                            label="Banner (offer page top)"
+                            value={form.bannerUrl}
+                            onChange={set("bannerUrl")}
+                            hint="Falls back to the card image, then logo."
+                          />
+                          <ImageUrlField
+                            label="Brand logo"
+                            value={form.brandLogoUrl}
+                            onChange={set("brandLogoUrl")}
+                            hint="Brand chip on the offer page."
+                          />
+                        </div>
+                      </Section>
+
+                      <Section title="Reward display">
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                          <Field
+                            label="Coins shown in app"
+                            htmlFor="of-coins"
+                            hint="0 = show the coins earned."
+                          >
+                            <Input
+                              id="of-coins"
+                              type="number"
+                              min={0}
+                              max={10_000_000}
+                              step={1}
+                              value={form.rewardCoins}
+                              onChange={(e) =>
+                                set("rewardCoins")(e.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field
+                            label="Website reward label"
+                            htmlFor="of-reward-label"
+                            hint="Replaces the number on the offer page."
+                          >
+                            <Input
+                              id="of-reward-label"
+                              maxLength={80}
+                              value={form.rewardLabel}
+                              onChange={(e) =>
+                                set("rewardLabel")(e.target.value)
+                              }
+                              placeholder="₹50 cashback"
+                            />
+                          </Field>
+                          <Field label="Difficulty">
+                            <Select
+                              value={form.difficulty}
+                              onValueChange={(value) =>
+                                set("difficulty")(value as OfferDifficulty)
+                              }
+                            >
+                              <SelectTrigger>
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="EASY">Easy</SelectItem>
+                                <SelectItem value="MEDIUM">Medium</SelectItem>
+                                <SelectItem value="HARD">Hard</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </Field>
+                          <Field label="Estimated time" htmlFor="of-time">
+                            <Input
+                              id="of-time"
+                              maxLength={40}
+                              value={form.estimatedTime}
+                              onChange={(e) =>
+                                set("estimatedTime")(e.target.value)
+                              }
+                              placeholder="10 min"
+                            />
+                          </Field>
+                          <Field label="Rating (0–5)" htmlFor="of-rating">
+                            <Input
+                              id="of-rating"
+                              type="number"
+                              min={0}
+                              max={5}
+                              step="0.1"
+                              value={form.rating}
+                              onChange={(e) => set("rating")(e.target.value)}
+                              placeholder="4.5"
+                            />
+                          </Field>
+                        </div>
+                      </Section>
+
+                      <Section
+                        title="Limits"
+                        hint="Blank means unlimited. Enforced when users submit proof."
+                      >
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <Field label="Offer expiry" htmlFor="of-expiry">
+                            <Input
+                              id="of-expiry"
+                              type="datetime-local"
+                              value={form.expiresAt}
+                              onChange={(e) =>
+                                set("expiresAt")(e.target.value)
+                              }
+                            />
+                          </Field>
+                          <Field label="Max users" htmlFor="of-max-users">
+                            <Input
+                              id="of-max-users"
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={form.maxUsers}
+                              onChange={(e) => set("maxUsers")(e.target.value)}
+                              placeholder="∞"
+                            />
+                          </Field>
+                          <Field label="Max rewards" htmlFor="of-max-rewards">
+                            <Input
+                              id="of-max-rewards"
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={form.maxRewards}
+                              onChange={(e) =>
+                                set("maxRewards")(e.target.value)
+                              }
+                              placeholder="∞"
+                            />
+                          </Field>
+                          <Field label="Daily limit / user" htmlFor="of-daily">
+                            <Input
+                              id="of-daily"
+                              type="number"
+                              min={1}
+                              step={1}
+                              value={form.dailyLimit}
+                              onChange={(e) =>
+                                set("dailyLimit")(e.target.value)
+                              }
+                              placeholder="∞"
+                            />
+                          </Field>
+                        </div>
+                      </Section>
+
+                      <Section title="Ordering & badges">
+                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                          <Field
+                            label="Priority"
+                            htmlFor="of-priority"
+                            hint="Higher shows first."
+                          >
+                            <Input
+                              id="of-priority"
+                              type="number"
+                              min={0}
+                              max={10_000}
+                              step={1}
+                              value={form.priority}
+                              onChange={(e) => set("priority")(e.target.value)}
+                            />
+                          </Field>
+                          <div className="col-span-2 flex flex-wrap items-center gap-x-5 gap-y-3 pt-6 sm:col-span-3">
+                            <label className="flex cursor-pointer items-center gap-2 text-sm">
+                              <Switch
+                                checked={form.featured}
+                                onCheckedChange={set("featured")}
+                              />
+                              Featured
+                            </label>
+                            <label className="flex cursor-pointer items-center gap-2 text-sm">
+                              <Switch
+                                checked={form.trending}
+                                onCheckedChange={set("trending")}
+                              />
+                              Trending
+                              <span className="text-xs text-muted-foreground">
+                                (“HOT” ribbon)
+                              </span>
+                            </label>
+                          </div>
+                        </div>
+                        <Field
+                          label="After a user completes this offer"
+                          hint="Applies once their proof is approved. Other users are unaffected."
+                        >
+                          <Select
+                            value={form.completedBehavior}
+                            onValueChange={(value) =>
+                              set("completedBehavior")(
+                                value as CompletedBehavior,
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="SHOW">
+                                Keep showing the offer normally
+                              </SelectItem>
+                              <SelectItem value="HIDE">
+                                Hide the offer from them
+                              </SelectItem>
+                              <SelectItem value="SHOW_COMPLETED">
+                                Show with a disabled &quot;Completed&quot;
+                                button
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </Field>
+                      </Section>
+                    </div>
+                  </details>
                 </form>
               )}
             </div>
 
             <div className="flex items-center gap-3 border-t px-6 py-4">
               <p className="mr-auto text-xs text-muted-foreground">
-                {STATUS_NOTE[form.status]}
+                {noCategory
+                  ? "Add a category first (Categories tab)."
+                  : STATUS_NOTE[form.status]}
               </p>
               <Button
                 type="button"
@@ -791,13 +814,15 @@ export const OfferFormDialog = ({
               <Button
                 type="submit"
                 form="offer-form"
-                disabled={save.isPending || !loaded}
+                disabled={save.isPending || !loaded || noCategory}
               >
                 {save.isPending
                   ? "Saving…"
                   : offer
                     ? "Save changes"
-                    : `Create ${noun}`}
+                    : form.status === "PUBLISHED"
+                      ? "Publish offer"
+                      : "Save draft"}
               </Button>
             </div>
           </div>

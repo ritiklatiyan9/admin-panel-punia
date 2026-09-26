@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -49,24 +50,52 @@ import type {
   OfferCategory,
 } from "@/types/domain";
 import { CategoryCard } from "./CategoryCards";
-import { CategoryFormDialog } from "./CategoryFormDialog";
-import { FeedbackPageDialog } from "./FeedbackPageDialog";
-import { OfferFormDialog } from "./OfferFormDialog";
 import { OFFER_GRID, OfferCard, OfferCardSkeletons } from "./OfferCards";
-import { SubmissionsReview } from "./SubmissionsReview";
-import { RewardSettings } from "./RewardSettings";
-import { FraudDetection } from "./FraudDetection";
+
+const CategoryFormDialog = lazy(() =>
+  import("./CategoryFormDialog").then((m) => ({
+    default: m.CategoryFormDialog,
+  })),
+);
+const OfferFormDialog = lazy(() =>
+  import("./OfferFormDialog").then((m) => ({ default: m.OfferFormDialog })),
+);
+const SubmissionsReview = lazy(() =>
+  import("./SubmissionsReview").then((m) => ({ default: m.SubmissionsReview })),
+);
+const RewardSettings = lazy(() =>
+  import("./RewardSettings").then((m) => ({ default: m.RewardSettings })),
+);
+const FraudDetection = lazy(() =>
+  import("./FraudDetection").then((m) => ({ default: m.FraudDetection })),
+);
 
 const PAGE_SIZE = 12;
 
-type View =
-  "categories" | "offers" | "submissions" | "fraud" | "analytics" | "settings";
+// The one admin module for everything users earn from (was Hot Offers + App
+// Offers + Campaigns). The tab lives in ?tab= so other pages can deep-link.
+const VIEWS = [
+  "offers",
+  "proofs",
+  "categories",
+  "analytics",
+  "fraud",
+  "settings",
+] as const;
+type View = (typeof VIEWS)[number];
 
 const STATUS_OPTIONS = [
   { value: "ALL", label: "All statuses" },
-  { value: "DRAFT", label: "Draft" },
-  { value: "PUBLISHED", label: "Published" },
-  { value: "ARCHIVED", label: "Archived" },
+  { value: "PUBLISHED", label: "Live" },
+  { value: "DRAFT", label: "Draft (hidden)" },
+  { value: "ARCHIVED", label: "Archived (hidden)" },
+];
+
+type Where = "ALL" | "HOME" | "LIST";
+const WHERE_OPTIONS: { value: Where; label: string }[] = [
+  { value: "ALL", label: "All placements" },
+  { value: "HOME", label: "Featured on Home" },
+  { value: "LIST", label: "Feedback Zone only" },
 ];
 
 const RANGE_LABELS: Record<AnalyticsRange, string> = {
@@ -82,11 +111,6 @@ const CATEGORY_COLUMNS: ExportColumn[] = [
   { key: "priority", label: "Priority" },
   { key: "offerCount", label: "Offers" },
   { key: "featured", label: "Featured", format: (v) => (v ? "Yes" : "No") },
-  {
-    key: "hasFeedbackPage",
-    label: "Feedback page",
-    format: (v) => (v ? "Yes" : "No"),
-  },
   { key: "status", label: "Status" },
   {
     key: "createdAt",
@@ -103,8 +127,9 @@ const OFFER_COLUMNS: ExportColumn[] = [
     label: "Category",
     format: (v) => (v as { title: string }).title,
   },
-  { key: "rewardAmount", label: "Reward coins" },
-  { key: "rewardCoins", label: "Coins" },
+  { key: "rewardAmount", label: "Coins earned" },
+  { key: "rewardCoins", label: "Coins shown in app" },
+  { key: "isProduct", label: "On Home", format: (v) => (v ? "Yes" : "No") },
   { key: "difficulty", label: "Difficulty" },
   { key: "priority", label: "Priority" },
   { key: "featured", label: "Featured", format: (v) => (v ? "Yes" : "No") },
@@ -142,14 +167,17 @@ export const HotOffersPage = (): JSX.Element => {
   const user = useAuthStore((state) => state.user);
   const canWrite = user?.role === "SUPER_ADMIN";
 
-  const [view, setView] = useState<View>("categories");
+  const [params, setParams] = useSearchParams();
+  const tab = params.get("tab");
+  const view: View = VIEWS.find((v) => v === tab) ?? "offers";
+  const setView = (next: View): void =>
+    setParams(next === "offers" ? {} : { tab: next }, { replace: true });
 
   // categories state
   const [categoryDialog, setCategoryDialog] = useState(false);
   const [editingCategory, setEditingCategory] = useState<OfferCategory | null>(
     null,
   );
-  const [feedbackFor, setFeedbackFor] = useState<OfferCategory | null>(null);
   const [deleteCategory, setDeleteCategory] = useState<OfferCategory | null>(
     null,
   );
@@ -160,31 +188,40 @@ export const HotOffersPage = (): JSX.Element => {
   const [statusFilter, setStatusFilter] = useState<ContentStatus | "ALL">(
     "ALL",
   );
+  const [where, setWhere] = useState<Where>("ALL");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
   const [offerDialog, setOfferDialog] = useState(false);
   const [editingOffer, setEditingOffer] = useState<HotOffer | null>(null);
   const [deleteOffer, setDeleteOffer] = useState<HotOffer | null>(null);
 
   // analytics state
-  const [range, setRange] = useState<AnalyticsRange>("daily");
+  const requestedRange = params.get("range");
+  const range: AnalyticsRange =
+    requestedRange === "weekly" || requestedRange === "monthly"
+      ? requestedRange
+      : "daily";
+  const setRange = (next: AnalyticsRange): void => {
+    setParams(
+      (current) => {
+        const updated = new URLSearchParams(current);
+        updated.set("range", next);
+        return updated;
+      },
+      { replace: true },
+    );
+  };
 
   const categories = useQuery({
     queryKey: ["hot-offers", "categories"],
-    queryFn: hotOffersService.listCategories,
+    queryFn: ({ signal }) => hotOffersService.listCategories(signal),
+    enabled: view === "offers" || view === "categories",
   });
 
   const offers = useQuery({
     queryKey: [
       "hot-offers",
       "offers",
-      {
-        page,
-        search,
-        statusFilter,
-        categoryFilter,
-        product: false,
-        limit: PAGE_SIZE,
-      },
+      { page, search, statusFilter, where, categoryFilter, limit: PAGE_SIZE },
     ],
     queryFn: ({ signal }) =>
       hotOffersService.listOffers(
@@ -195,12 +232,19 @@ export const HotOffersPage = (): JSX.Element => {
           search: search.trim() || undefined,
           status: statusFilter === "ALL" ? undefined : statusFilter,
           category: categoryFilter === "ALL" ? undefined : categoryFilter,
-          // App/brand (product) offers live on the App Offers page.
-          product: false,
+          product: where === "ALL" ? undefined : where === "HOME",
         },
         signal,
       ),
     enabled: view === "offers",
+  });
+
+  // Tab badge only. Lives under ["hot-offers","submissions"], so reviewing a
+  // proof (which invalidates that prefix) refreshes it.
+  const pendingProofs = useQuery({
+    queryKey: ["hot-offers", "submissions", "pending-count"],
+    queryFn: ({ signal }) =>
+      hotOffersService.submissionCount({ status: "PENDING" }, signal),
   });
 
   const analytics = useQuery({
@@ -243,14 +287,17 @@ export const HotOffersPage = (): JSX.Element => {
   };
 
   const hasFilters =
-    search.trim() !== "" || statusFilter !== "ALL" || categoryFilter !== "ALL";
+    search.trim() !== "" ||
+    statusFilter !== "ALL" ||
+    where !== "ALL" ||
+    categoryFilter !== "ALL";
   const percent = (value: number): string => `${(value * 100).toFixed(1)}%`;
 
   return (
     <div>
       <PageHeader
-        title="Hot Offers"
-        description="CMS for the app's Hot Offers funnel: categories, feedback pages, website offers and analytics."
+        title="Offers"
+        description="Apps and tasks users complete for coins. Live offers show in the app's Feedback Zone and Explore; switch on “Home” to also feature one on the Home screen."
         actions={
           canWrite ? (
             view === "categories" ? (
@@ -259,97 +306,52 @@ export const HotOffersPage = (): JSX.Element => {
               </Button>
             ) : view === "offers" ? (
               <Button onClick={openCreateOffer}>
-                <PlusIcon className="mr-1.5 h-4 w-4" /> New offer
+                <PlusIcon className="mr-1.5 h-4 w-4" /> Add offer
               </Button>
             ) : undefined
           ) : undefined
         }
       />
 
-      <Segmented
-        className="mb-4"
-        size="md"
-        value={view}
-        onChange={setView}
-        options={[
-          {
-            id: "categories",
-            label: (
-              <>
-                Categories
-                <Count value={categories.data?.length} />
-              </>
-            ),
-          },
-          {
-            id: "offers",
-            label: (
-              <>
-                Offers
-                <Count value={offers.data?.meta.total} />
-              </>
-            ),
-          },
-          { id: "submissions", label: "Submissions" },
-          { id: "fraud", label: "Fraud" },
-          { id: "analytics", label: "Analytics" },
-          { id: "settings", label: "Settings" },
-        ]}
-      />
-
-      {view === "categories" && (
-        <>
-          <FiltersBar>
-            <div className="ml-auto">
-              <ExportButton
-                rows={
-                  (categories.data ?? []) as unknown as Record<
-                    string,
-                    unknown
-                  >[]
-                }
-                columns={CATEGORY_COLUMNS}
-                fileName="hot-offer-categories"
-                title="Hot Offer categories"
-              />
-            </div>
-          </FiltersBar>
-
-          {categories.isLoading ? (
-            <OfferCardSkeletons />
-          ) : !categories.data || categories.data.length === 0 ? (
-            <Card>
-              <EmptyState
-                title="No categories yet"
-                description="Create the first category to light up the app's Hot Offers screen."
-                action={
-                  canWrite ? (
-                    <Button onClick={openCreateCategory}>
-                      <PlusIcon className="mr-1.5 h-4 w-4" /> New category
-                    </Button>
-                  ) : undefined
-                }
-              />
-            </Card>
-          ) : (
-            <div className={OFFER_GRID}>
-              {categories.data.map((category) => (
-                <CategoryCard
-                  key={category.id}
-                  category={category}
-                  canWrite={canWrite}
-                  onEdit={() => {
-                    setEditingCategory(category);
-                    setCategoryDialog(true);
-                  }}
-                  onFeedbackPage={() => setFeedbackFor(category)}
-                  onDelete={() => setDeleteCategory(category)}
-                />
-              ))}
-            </div>
-          )}
-        </>
-      )}
+      <div className="mb-4 max-w-full overflow-x-auto whitespace-nowrap">
+        <Segmented
+          size="md"
+          value={view}
+          onChange={setView}
+          options={[
+            {
+              id: "offers",
+              label: (
+                <>
+                  Offers
+                  <Count value={offers.data?.meta.total} />
+                </>
+              ),
+            },
+            {
+              id: "proofs",
+              label: (
+                <>
+                  Proofs to review
+                  <Count value={pendingProofs.data} />
+                </>
+              ),
+            },
+            {
+              id: "categories",
+              label: (
+                <>
+                  Categories
+                  <Count value={categories.data?.length} />
+                </>
+              ),
+            },
+            { id: "analytics", label: "Analytics" },
+            { id: "fraud", label: "Fraud" },
+            { id: "settings", label: "Settings" },
+          ]}
+        />
+      </div>
 
       {view === "offers" && (
         <>
@@ -375,6 +377,16 @@ export const HotOffersPage = (): JSX.Element => {
                 className: "sm:w-40",
               },
               {
+                key: "where",
+                value: where,
+                onChange: (value) => {
+                  setWhere(value as Where);
+                  setPage(1);
+                },
+                options: WHERE_OPTIONS,
+                placeholder: "Placement",
+              },
+              {
                 key: "category",
                 value: categoryFilter,
                 onChange: (value) => {
@@ -394,6 +406,7 @@ export const HotOffersPage = (): JSX.Element => {
             onClearAll={() => {
               setSearch("");
               setStatusFilter("ALL");
+              setWhere("ALL");
               setCategoryFilter("ALL");
               setPage(1);
             }}
@@ -407,12 +420,15 @@ export const HotOffersPage = (): JSX.Element => {
                   >[]
                 }
                 columns={OFFER_COLUMNS}
-                fileName="hot-offers"
-                title="Hot Offers"
+                fileName="offers"
+                title="Offers"
                 page={page}
                 filterSummary={
                   [
                     statusFilter !== "ALL" ? `Status: ${statusFilter}` : "",
+                    where !== "ALL"
+                      ? `Placement: ${WHERE_OPTIONS.find((w) => w.value === where)?.label}`
+                      : "",
                     categoryFilter !== "ALL"
                       ? `Category: ${
                           categories.data?.find(
@@ -429,11 +445,6 @@ export const HotOffersPage = (): JSX.Element => {
             </div>
           </FiltersBar>
 
-          <p className="mb-3 text-sm text-muted-foreground">
-            Feedback offers only — app/brand (product) offers moved to the App
-            Offers page.
-          </p>
-
           {offers.isLoading ? (
             <OfferCardSkeletons />
           ) : !offers.data || offers.data.items.length === 0 ? (
@@ -442,13 +453,13 @@ export const HotOffersPage = (): JSX.Element => {
                 title={hasFilters ? "No offers match" : "No offers yet"}
                 description={
                   hasFilters
-                    ? "Try a different search, status or category."
-                    : "Create the first feedback offer — it shows in the app's Hot Offers list once published."
+                    ? "Try a different search or filter."
+                    : "Add your first offer — it goes live in the app's Feedback Zone as soon as you save."
                 }
                 action={
                   canWrite && !hasFilters ? (
                     <Button onClick={openCreateOffer}>
-                      <PlusIcon className="mr-1.5 h-4 w-4" /> New offer
+                      <PlusIcon className="mr-1.5 h-4 w-4" /> Add offer
                     </Button>
                   ) : undefined
                 }
@@ -476,19 +487,80 @@ export const HotOffersPage = (): JSX.Element => {
         </>
       )}
 
-      {view === "submissions" && (
+      {view === "proofs" && (
+        <Suspense fallback={<TableSkeleton />}>
+          <SubmissionsReview />
+        </Suspense>
+      )}
+
+      {view === "categories" && (
         <>
-          <p className="mb-3 text-sm text-muted-foreground">
-            Feedback-offer submissions only — app/brand offer submissions are
-            reviewed on the App Offers page.
-          </p>
-          <SubmissionsReview product={false} />
+          <FiltersBar>
+            <p className="text-sm text-muted-foreground">
+              Categories are the small label above an offer&apos;s title in the
+              app and the filter chips on the website.
+            </p>
+            <div className="ml-auto">
+              <ExportButton
+                rows={
+                  (categories.data ?? []) as unknown as Record<
+                    string,
+                    unknown
+                  >[]
+                }
+                columns={CATEGORY_COLUMNS}
+                fileName="offer-categories"
+                title="Offer categories"
+              />
+            </div>
+          </FiltersBar>
+
+          {categories.isLoading ? (
+            <OfferCardSkeletons />
+          ) : !categories.data || categories.data.length === 0 ? (
+            <Card>
+              <EmptyState
+                title="No categories yet"
+                description="Offers need a category — create one (e.g. “Feedback Zone”) before adding offers."
+                action={
+                  canWrite ? (
+                    <Button onClick={openCreateCategory}>
+                      <PlusIcon className="mr-1.5 h-4 w-4" /> New category
+                    </Button>
+                  ) : undefined
+                }
+              />
+            </Card>
+          ) : (
+            <div className={OFFER_GRID}>
+              {categories.data.map((category) => (
+                <CategoryCard
+                  key={category.id}
+                  category={category}
+                  canWrite={canWrite}
+                  onEdit={() => {
+                    setEditingCategory(category);
+                    setCategoryDialog(true);
+                  }}
+                  onDelete={() => setDeleteCategory(category)}
+                />
+              ))}
+            </div>
+          )}
         </>
       )}
 
-      {view === "fraud" && <FraudDetection />}
+      {view === "fraud" && (
+        <Suspense fallback={<TableSkeleton />}>
+          <FraudDetection />
+        </Suspense>
+      )}
 
-      {view === "settings" && <RewardSettings />}
+      {view === "settings" && (
+        <Suspense fallback={<TableSkeleton />}>
+          <RewardSettings />
+        </Suspense>
+      )}
 
       {view === "analytics" && (
         <div className="space-y-4">
@@ -514,8 +586,8 @@ export const HotOffersPage = (): JSX.Element => {
                 >[]
               }
               columns={SERIES_COLUMNS}
-              fileName="hot-offers-analytics"
-              title="Hot Offers analytics timeline"
+              fileName="offers-analytics"
+              title="Offers analytics timeline"
               filterSummary={`Range: ${RANGE_LABELS[range]}`}
             />
           </div>
@@ -638,22 +710,25 @@ export const HotOffersPage = (): JSX.Element => {
         </div>
       )}
 
-      <CategoryFormDialog
-        open={categoryDialog}
-        onOpenChange={setCategoryDialog}
-        category={editingCategory}
-      />
-      <FeedbackPageDialog
-        open={feedbackFor !== null}
-        onOpenChange={(open) => !open && setFeedbackFor(null)}
-        category={feedbackFor}
-      />
-      <OfferFormDialog
-        open={offerDialog}
-        onOpenChange={setOfferDialog}
-        categories={categories.data ?? []}
-        offer={editingOffer}
-      />
+      {categoryDialog && (
+        <Suspense fallback={<p role="status">Loading category editor…</p>}>
+          <CategoryFormDialog
+            open={categoryDialog}
+            onOpenChange={setCategoryDialog}
+            category={editingCategory}
+          />
+        </Suspense>
+      )}
+      {offerDialog && (
+        <Suspense fallback={<p role="status">Loading offer editor…</p>}>
+          <OfferFormDialog
+            open={offerDialog}
+            onOpenChange={setOfferDialog}
+            categories={categories.data ?? []}
+            offer={editingOffer}
+          />
+        </Suspense>
+      )}
       <ConfirmDialog
         open={deleteCategory !== null}
         onOpenChange={(open) => !open && setDeleteCategory(null)}

@@ -137,35 +137,6 @@ export interface OfferCategoryInput {
   status: ContentStatus;
 }
 
-export interface FeedbackPage {
-  id: string;
-  categoryId: string;
-  categorySlug: string;
-  categoryTitle: string;
-  categoryImageUrl: string | null;
-  bannerUrl: string | null;
-  title: string;
-  description: string;
-  benefits: string[];
-  rewardPoints: number;
-  buttonText: string;
-  buttonVisible: boolean;
-  websiteUrl: string;
-  status: ContentStatus;
-}
-
-export interface FeedbackPageInput {
-  bannerUrl?: string | null;
-  title: string;
-  description: string;
-  benefits: string[];
-  rewardPoints: number;
-  buttonText: string;
-  buttonVisible: boolean;
-  websiteUrl: string;
-  status: ContentStatus;
-}
-
 export type OfferDifficulty = "EASY" | "MEDIUM" | "HARD";
 
 /** What a user who completed the offer (APPROVED submission) sees in the app. */
@@ -256,6 +227,7 @@ export type SubmissionStatus =
   | "CANCELLED";
 
 export interface OfferSubmission {
+  screenshotCount?: number;
   id: string;
   offerId: string;
   offerTitle: string;
